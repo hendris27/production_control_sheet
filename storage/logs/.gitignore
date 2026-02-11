@@ -1,0 +1,2 @@
+*style="background: url('{{ asset('storage/photo/bg-login2.jpg') }}')  center center / cover no-repeat; // buat call bg-image
+!.gitignore
