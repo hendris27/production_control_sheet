@@ -125,6 +125,7 @@ class CreateAllUsersSeeder extends Seeder
                 [
                     'name' => $specialNames[$nik] ?? $nik,
                     'password' => Hash::make($nik),
+                    'role' => $rName,
                 ]
             );
 
@@ -307,14 +308,6 @@ class CreateAllUsersSeeder extends Seeder
 
         foreach ($list as $item) {
 
-            $user = User::firstOrCreate(
-                ['nik' => $item['nik']],
-                [
-                    'name'     => $item['name'],
-                    'password' => Hash::make($item['nik']),
-                ]
-            );
-
             // Default role
             $roleName = 'operator';
 
@@ -322,6 +315,15 @@ class CreateAllUsersSeeder extends Seeder
             if (isset($specialRoles[$item['nik']])) {
                 $roleName = $specialRoles[$item['nik']];
             }
+
+            $user = User::firstOrCreate(
+                ['nik' => $item['nik']],
+                [
+                    'name'     => $item['name'],
+                    'password' => Hash::make($item['nik']),
+                    'role'     => $roleName,
+                ]
+            );
 
             $user->syncRoles([$roleName]);
 
