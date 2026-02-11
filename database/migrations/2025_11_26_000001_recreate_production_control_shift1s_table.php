@@ -21,15 +21,23 @@ return new class extends Migration
             $table->string('model')->nullable();
             $table->string('dj_number')->nullable();
             $table->foreignId('customer_id')->nullable()->constrained('customers')->cascadeOnDelete();
+            $table->string('customer_name')->nullable();
             $table->string('line')->nullable();
-            $table->string('select_shiftgroup')->nullable()->default('1/A');
-            $table->string('work_hours')->nullable()->default('7 Hours');
-            $table->string('shift_group')->nullable()->default('1/A');
-            
+            $table->string('select_shift')->nullable();
+            $table->string('select_group')->nullable();
+            $table->string('work_hours')->nullable();
+
             // Production Data - JSON column untuk menyimpan per-slot data
             $table->json('slots')->nullable()->default('[]');
-            
+            $table->string('operators')->nullable();
+            // Detail NG Record
+
+            $table->integer('qty_')->nullable();
+            $table->integer('ng_item')->nullable();
+            $table->integer('ng_item')->nullable();
+
             // Quality Information Sheet
+            $table->json('quality_information')->nullable()->default('[]');
             $table->string('process')->nullable();
             $table->string('ng_item')->nullable();
             $table->string('loc')->nullable();
@@ -37,31 +45,27 @@ return new class extends Migration
             $table->string('sop_adr')->nullable();
             $table->string('ipqc')->nullable();
             $table->text('remarks_qc')->nullable();
-            
+
             // Operator List
-            $table->string('op_process_1')->nullable();
-            $table->string('op_name_1')->nullable();
-            $table->string('op_process_2')->nullable();
-            $table->string('op_name_2')->nullable();
-            
+
             // Output After Change Model
             $table->string('model_output')->nullable();
             $table->time('start_time')->nullable();
             $table->time('end_time')->nullable();
             $table->integer('output')->nullable()->default(0);
-            
+
             // Totals (untuk display/calculation)
             $table->integer('target_total')->nullable()->default(0);
             $table->integer('actual_total')->nullable()->default(0);
             $table->integer('ng_total')->nullable()->default(0);
             $table->integer('loss_total')->nullable()->default(0);
             $table->integer('balance_total')->nullable()->default(0);
-            
+
             // Approval
             $table->string('issued')->nullable()->default('SOP');
             $table->string('checked')->nullable()->default('Leader');
             $table->string('approved')->nullable()->default('SPV');
-            
+
             $table->timestamps();
         });
     }
