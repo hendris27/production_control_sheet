@@ -36,6 +36,7 @@ class DatabaseSeeder extends Seeder
             [
                 'name' => 'Admin',
                 'password' => bcrypt('password'),
+                'role' => 'admin',
             ]
         );
         $user->assignRole('admin');
