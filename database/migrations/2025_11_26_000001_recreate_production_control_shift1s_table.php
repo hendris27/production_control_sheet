@@ -32,9 +32,9 @@ return new class extends Migration
             $table->string('operators')->nullable();
             // Detail NG Record
 
-            $table->integer('qty_')->nullable();
-            $table->integer('ng_item')->nullable();
-            $table->integer('ng_item')->nullable();
+            $table->integer('qty_ok')->nullable();
+            $table->integer('qty_ng')->nullable();
+            $table->integer('total_qty')->nullable();
 
             // Quality Information Sheet
             $table->json('quality_information')->nullable()->default('[]');

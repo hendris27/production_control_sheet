@@ -16,19 +16,27 @@ class DatabaseSeeder extends Seeder
         // User::factory(10)->create();
 
         $this->call([
-            RoleSeeder::class,
-            CreateAllUsersSeeder::class,
             ChecksheetListSeeder::class,
+            CreateAllUsersSeeder::class,
+            CustomerSeeder::class,
+            IPQCNameListSeeder::class,
             IronSolderInspectionSeeder::class,
+            LeaderNameListSeeder::class,
             ListNgSeeder::class,
+            OperatorsNameListSeeder::class,
+            ProcessSeeder::class,
+            RoleSeeder::class,
+            SopNameListSeeder::class,
+            SpvNameListSeeder::class,
+            TargetUphSeeder::class,
+            TechnicianNameListSeeder::class,
             TimeSlotShift1_7hSeeder::class,
             TimeSlotShift1_5hSeeder::class,
-            TargetUphSeeder::class,
-            ProcessSeeder::class,
-            SopNameListSeeder::class,
-            LeaderNameListSeeder::class,
-            SpvNameListSeeder::class,
-            TechnicianNameListSeeder::class,
+            TimeSlotShift2_7hSeeder::class,
+            TimeSlotShift2_5hSeeder::class,
+            TimeSlotShift3_7hSeeder::class,
+            TimeSlotShift3_5hSeeder::class,
+
         ]);
 
         $user = User::updateOrCreate(
@@ -36,6 +44,7 @@ class DatabaseSeeder extends Seeder
             [
                 'name' => 'Admin',
                 'password' => bcrypt('password'),
+                'role' => 'admin',
             ]
         );
         $user->assignRole('admin');
