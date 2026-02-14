@@ -12,12 +12,12 @@ class IPQCNameListSeeder extends Seeder
      */
     public function run(): void
     {
-        DB::table('i_p_q_c_name_lists')->insert([
+        $rows = [
             [
                 'no' => 1,
                 'nik' => '25096180',
                 'name' => 'Hendri',
-                 'created_at' => now(),
+                'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
@@ -27,18 +27,26 @@ class IPQCNameListSeeder extends Seeder
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
-            ['no' => 3,
+            [
+                'no' => 3,
                 'nik' => '21125406',
                 'name' => 'Jelita Puspa Dewi',
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
-            ['no' => 4,
+            [
+                'no' => 4,
                 'nik' => '24016032',
                 'name' => 'Rina Indriyani',
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
-        ]);
+        ];
+
+        DB::table('i_p_q_c_name_lists')->upsert(
+            $rows,
+            ['nik'], // unique constraint key
+            ['no', 'name', 'updated_at'] // columns to update when duplicate
+        );
     }
 }

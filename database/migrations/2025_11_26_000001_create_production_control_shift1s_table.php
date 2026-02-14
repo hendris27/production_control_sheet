@@ -62,9 +62,9 @@ return new class extends Migration
             $table->integer('balance_total')->nullable()->default(0);
 
             // Approval
-            $table->string('issued')->nullable()->default('SOP');
-            $table->string('checked')->nullable()->default('Leader');
-            $table->string('approved')->nullable()->default('SPV');
+            $table->string('issued_sop')->nullable()->default('SOP');
+            $table->string('checked_leader')->nullable()->default('Leader');
+            $table->string('approved_spv')->nullable()->default('SPV');
 
             $table->timestamps();
         });
