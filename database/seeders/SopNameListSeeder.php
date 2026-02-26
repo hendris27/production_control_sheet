@@ -34,6 +34,8 @@ class SopNameListSeeder extends Seeder
             ['no' => 18, 'name' => 'Eva Ameliana', 'nik' => '22015468'],
             ['no' => 19, 'name' => 'Camila Cantika Dewi', 'nik' => '23015787'],
             ['no' => 20, 'name' => 'Nisa Nurfadiyah', 'nik' => '21045021'],
+            ['no' => 21, 'name' => 'Hendri', 'nik' => '25096180'],
+
         ]);
     }
 }
