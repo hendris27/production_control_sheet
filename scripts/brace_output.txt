@@ -1,0 +1,803 @@
+﻿0001 d=0 <?php
+0002 d=0 
+0003 d=0 namespace App\Jobs;
+0004 d=0 
+0005 d=0 use App\Models\ProductionControlShift1;
+0006 d=0 use Carbon\Carbon;
+0007 d=0 use Illuminate\Bus\Queueable;
+0008 d=0 use Illuminate\Contracts\Queue\ShouldQueue;
+0009 d=0 use Illuminate\Foundation\Bus\Dispatchable;
+0010 d=0 use Illuminate\Queue\InteractsWithQueue;
+0011 d=0 use Illuminate\Queue\SerializesModels;
+0012 d=0 
+0013 d=0 class GenerateProductionReports implements ShouldQueue
+0014 d=1 {
+0015 d=1     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+0016 d=1 
+0017 d=1     public array $ids;
+0018 d=1 
+0019 d=1     /**
+0020 d=1      * Create a new job instance.
+0021 d=1      *
+0022 d=1      * @param array|string $ids
+0023 d=1      */
+0024 d=1     public function __construct($ids)
+0025 d=2     {
+0026 d=3         if (is_string($ids)) {
+0027 d=3             $ids = array_filter(array_map('trim', explode(',', $ids)));
+0028 d=2         }
+0029 d=2 
+0030 d=2         $this->ids = (array) $ids;
+0031 d=1     }
+0032 d=1 
+0033 d=1     /**
+0034 d=1      * Execute the job.
+0035 d=1      */
+0036 d=1     public function handle()
+0037 d=2     {
+0038 d=3         if (empty($this->ids)) {
+0039 d=3             return;
+0040 d=2         }
+0041 d=2 
+0042 d=2         $records = ProductionControlShift1::whereIn('id', $this->ids)->get();
+0043 d=3         if ($records->isEmpty()) {
+0044 d=3             return;
+0045 d=2         }
+0046 d=2 
+0047 d=2         // Ambil konfigurasi lokasi laporan dan fallback lokal
+0048 d=2         // preferred_root: target (Z:\PROD\REPORT PCS - mapped drive)
+0049 d=2         // fallback_subdir: subfolder di storage/app jika preferred tidak tersedia
+0050 d=2         $preferredRoot = 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS';
+0051 d=2         // aaPanel default path Anda (jika ingin hardcoded) dan juga dapat di-override via .env AAPANEL_REPORTS_DIR
+0052 d=2         $aapanelRoot = env('AAPANEL_REPORTS_DIR', '/www/wwwroot/production_control_sheet/storage/app/reports');
+0053 d=2         // normalize preferredRoot / aapanelRoot separators
+0054 d=2         $preferredRoot = $preferredRoot ? rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $preferredRoot), DIRECTORY_SEPARATOR) : null;
+0055 d=2         $aapanelRoot = $aapanelRoot ? rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $aapanelRoot), DIRECTORY_SEPARATOR) : null;
+0056 d=2         // sub-roots inside AAPANEL_REPORTS_DIR
+0057 d=2         $aapanelPdfRoot = $aapanelRoot ? $aapanelRoot . DIRECTORY_SEPARATOR . 'pdf' : null;
+0058 d=2         $aapanelExcelRoot = $aapanelRoot ? $aapanelRoot . DIRECTORY_SEPARATOR . 'excel' : null;
+0059 d=2         $aapanelCsvRoot = $aapanelRoot ? $aapanelRoot . DIRECTORY_SEPARATOR . 'csv' : null;
+0060 d=2         $fallbackRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports'));
+0061 d=2         $fallbackRoot = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $fallbackRoot), DIRECTORY_SEPARATOR);
+0062 d=2 
+0063 d=2         // Helper untuk test write capability dengan membuat temporary file
+0064 d=3         $testWritable = function (string $dir) {
+0065 d=4             try {
+0066 d=4                 // Normalize path dengan backslash untuk Windows UNC
+0067 d=5                 if (strpos($dir, '\\192') === 0 || strpos($dir, '\\\\') === 0) {
+0068 d=5                     // UNC path - gunakan backslash
+0069 d=5                     $testDir = str_replace('/', '\\', $dir);
+0070 d=5                 } else {
+0071 d=5                     // Mapped drive atau local - normalize dengan DIRECTORY_SEPARATOR
+0072 d=5                     $testDir = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $dir), DIRECTORY_SEPARATOR);
+0073 d=4                 }
+0074 d=4 
+0075 d=4                 \Illuminate\Support\Facades\Log::debug('GenerateProductionReports: testing write to', ['dir' => $testDir]);
+0076 d=4 
+0077 d=5                 if (! @is_dir($testDir)) {
+0078 d=5                     @mkdir($testDir, 0777, true);
+0079 d=5                     \Illuminate\Support\Facades\Log::debug('GenerateProductionReports: created directory', ['dir' => $testDir]);
+0080 d=4                 }
+0081 d=4 
+0082 d=4                 $testFile = $testDir . DIRECTORY_SEPARATOR . '.write-test-' . uniqid();
+0083 d=4                 $res = @file_put_contents($testFile, 'test');
+0084 d=5                 if ($res === false) {
+0085 d=5                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: write test failed', ['dir' => $testDir, 'testFile' => $testFile]);
+0086 d=5                     return false;
+0087 d=4                 }
+0088 d=4 
+0089 d=4                 @unlink($testFile);
+0090 d=4                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: write test succeeded', ['dir' => $testDir]);
+0091 d=4                 return true;
+0092 d=4             } catch (\Throwable $e) {
+0093 d=4                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: write test exception', ['dir' => $dir, 'error' => $e->getMessage()]);
+0094 d=4                 return false;
+0095 d=3             }
+0096 d=2         };
+0097 d=2 
+0098 d=2         // Helper to ensure a directory exists and attempt to set permissive permissions
+0099 d=3         $ensureDir = function (string $dir) {
+0100 d=4             try {
+0101 d=4                 $dir = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $dir), DIRECTORY_SEPARATOR);
+0102 d=5                 if (! is_dir($dir)) {
+0103 d=5                     @mkdir($dir, 0777, true);
+0104 d=4                 }
+0105 d=4                 // Try to set permissive mode where possible (no-op on some systems)
+0106 d=4                 try { @chmod($dir, 0777); } catch (\Throwable $__e) { }
+0107 d=4                 return is_dir($dir);
+0108 d=4             } catch (\Throwable $e) {
+0109 d=4                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: ensureDir exception', ['dir' => $dir, 'error' => $e->getMessage()]);
+0110 d=4                 return false;
+0111 d=3             }
+0112 d=2         };
+0113 d=2 
+0114 d=2         // Helper to attempt copying a file with retries and small delays
+0115 d=3         $verifyAndRetryCopy = function (string $source, string $dest, int $attempts = 3, int $delayMs = 500) {
+0116 d=4             try {
+0117 d=5                 for ($i = 0; $i < $attempts; $i++) {
+0118 d=6                     if (file_exists($dest) && filesize($dest) > 0) {
+0119 d=6                         return true;
+0120 d=5                     }
+0121 d=5 
+0122 d=5                     if (! is_dir(dirname($dest))) { @mkdir(dirname($dest), 0777, true); }
+0123 d=6                     if (file_exists($source) && filesize($source) > 0) {
+0124 d=6                         @copy($source, $dest);
+0125 d=6                         clearstatcache(true, $dest);
+0126 d=7                         if (file_exists($dest) && filesize($dest) > 0) {
+0127 d=7                             return true;
+0128 d=6                         }
+0129 d=5                     }
+0130 d=5 
+0131 d=5                     // sleep for a bit before retrying
+0132 d=5                     usleep($delayMs * 1000);
+0133 d=4                 }
+0134 d=4             } catch (\Throwable $e) {
+0135 d=4                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: verifyAndRetryCopy exception', ['source' => $source, 'dest' => $dest, 'error' => $e->getMessage()]);
+0136 d=3             }
+0137 d=3             return false;
+0138 d=2         };
+0139 d=2 
+0140 d=2         // Attempt preferred roots dalam urutan: aaPanel path, Z: drive, UNC path, fallback ke storage lokal
+0141 d=2         $candidatePreferredRoots = [];
+0142 d=2 
+0143 d=2         // Candidate 0: aaPanel pdf path (direkomendasikan oleh user)
+0144 d=3         if (! empty($aapanelPdfRoot)) {
+0145 d=3             $candidatePreferredRoots[] = [
+0146 d=3                 'path' => $aapanelPdfRoot,
+0147 d=3                 'name' => 'aaPanel pdf folder (AAPANEL_REPORTS_DIR/pdf)',
+0148 d=3             ];
+0149 d=2         }
+0150 d=2 
+0151 d=2         // Candidate 1: Z: mapped drive
+0152 d=3         if (! empty($preferredRoot)) {
+0153 d=3             $candidatePreferredRoots[] = [
+0154 d=3                 'path' => $preferredRoot,
+0155 d=3                 'name' => 'Z: mapped drive',
+0156 d=3             ];
+0157 d=2         }
+0158 d=2 
+0159 d=2         // Candidate 2: UNC path (\\192.168.62.12\14 Prod-02\PROD\REPORT PCS)
+0160 d=2         $uncPath = '\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS';
+0161 d=2         $candidatePreferredRoots[] = [
+0162 d=2             'path' => $uncPath,
+0163 d=2             'name' => 'UNC network share',
+0164 d=2         ];
+0165 d=2 
+0166 d=2         $saveRoot = null;
+0167 d=2 
+0168 d=2         // Try each candidate
+0169 d=3         foreach ($candidatePreferredRoots as $candidate) {
+0170 d=3             $cand = $candidate['path'];
+0171 d=3             $candName = $candidate['name'];
+0172 d=3 
+0173 d=3             if (empty($cand)) { continue; }
+0174 d=3 
+0175 d=4             if ($testWritable($cand)) {
+0176 d=4                 $saveRoot = $cand;
+0177 d=4                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: berhasil memilih preferred report root', ['path' => $saveRoot, 'type' => $candName]);
+0178 d=4                 break;
+0179 d=4             } else {
+0180 d=4                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: candidate root tidak writable, skip', ['candidate' => $cand, 'type' => $candName]);
+0181 d=3             }
+0182 d=2         }
+0183 d=2 
+0184 d=2         // If no preferred root works, use local fallback
+0185 d=3         if (empty($saveRoot) || $saveRoot === null) {
+0186 d=3             $saveRoot = $fallbackRoot;
+0187 d=3             \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: tidak ada preferred root yang tersedia, gunakan local storage fallback', ['fallback' => $fallbackRoot]);
+0188 d=2         }
+0189 d=2 
+0190 d=2         // Nama bulan Bahasa Indonesia untuk membuat folder per-bulan berdasarkan tanggal record
+0191 d=2         $monthNames = [1=>'januari','februari','maret','april','mei','juni','juli','agustus','september','oktober','november','desember'];
+0192 d=2 
+0193 d=2         \Illuminate\Support\Facades\Log::info('GenerateProductionReports: starting job', ['ids' => $this->ids]);
+0194 d=2 
+0195 d=2             // sanitize filename (allow letters, numbers, dash, underscore, dot)
+0196 d=2             $filenameBase = preg_replace('/[^A-Za-z0-9\-\._]+/', '-', $filenameBase);
+0197 d=2             $filenameBase = trim($filenameBase, '-._');
+0198 d=2 
+0199 d=2             $monthName = $monthNames[(int) $recordDate->format('n')];
+0200 d=2 
+0201 d=2             // Build PDF directory with proper path handling for Windows UNC/mapped drives
+0202 d=2             // store PDFs under a top-level 'pdf' folder: preferred_root/pdf/<bulan>/<customer>/<tanggal>
+0203 d=2             $pdfDir = $saveRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+0204 d=3             if (! is_dir($pdfDir)) {
+0205 d=3                 $mkdirRes = $ensureDir($pdfDir);
+0206 d=4                 if (! $mkdirRes) {
+0207 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create PDF directory', ['dir' => $pdfDir, 'id' => $rec->id]);
+0208 d=3                 }
+0209 d=2             }
+0210 d=2 
+0211 d=2             // Only write PDF files into the date folder (no HTML fallback saved there)
+0212 d=3             if (app()->bound('dompdf.wrapper')) {
+0213 d=4                 try {
+0214 d=4                     $pdf = app('dompdf.wrapper')->loadView('pdf.production_control', $data);
+0215 d=4                     $content = $pdf->output();
+0216 d=4                     $path = $pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0217 d=4 
+0218 d=4                     $written = false;
+0219 d=5                     try {
+0220 d=5                         $res = @file_put_contents($path, $content);
+0221 d=5                         $written = $res !== false;
+0222 d=6                         if ($written) {
+0223 d=6                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: PDF berhasil ditulis', ['path' => $path, 'id' => $rec->id, 'bytes' => $res]);
+0224 d=5                         }
+0225 d=5                     } catch (\Throwable $e) {
+0226 d=5                         $written = false;
+0227 d=5                         \Illuminate\Support\Facades\Log::error('GenerateProductionReports: exception saat write PDF', ['path' => $path, 'id' => $rec->id, 'error' => $e->getMessage()]);
+0228 d=4                     }
+0229 d=4 
+0230 d=4                     // If write failed and we're not already on the local fallback, try storage fallback
+0231 d=5                     if (! $written && $saveRoot !== $fallbackRoot) {
+0232 d=6                         try {
+0233 d=6                             $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+0234 d=6                             if (! is_dir($fallbackPdfDir)) { $ensureDir($fallbackPdfDir); }
+0235 d=6                             $fallbackPath = $fallbackPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0236 d=6                             $res2 = @file_put_contents($fallbackPath, $content);
+0237 d=7                             if ($res2 !== false) {
+0238 d=7                                 $files[] = $fallbackPath;
+0239 d=7                                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: pdf write to preferred path failed, wrote to fallback', ['preferred' => $path, 'fallback' => $fallbackPath, 'id' => $rec->id]);
+0240 d=7 
+0241 d=7                                 $rec->downloaded_at = now();
+0242 d=7                                 $rec->save();
+0243 d=7                                 continue;
+0244 d=6                             }
+0245 d=6                         } catch (\Throwable $e) {
+0246 d=6                             \Illuminate\Support\Facades\Log::error('GenerateProductionReports: pdf fallback write error', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0247 d=5                         }
+0248 d=4                     }
+0249 d=4 
+0250 d=5                     if ($written) {
+0251 d=5                         $files[] = $path;
+0252 d=5                         \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf written', ['path' => $path, 'id' => $rec->id]);
+0253 d=5 
+0254 d=5                         // Also ensure a local copy exists under storage fallback for easy access
+0255 d=6                         try {
+0256 d=6                             $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+0257 d=6                             if (! is_dir($localPdfDir)) { $ensureDir($localPdfDir); }
+0258 d=6                             $localPath = $localPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0259 d=6                             @file_put_contents($localPath, $content);
+0260 d=6                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to local fallback', ['path' => $localPath, 'id' => $rec->id]);
+0261 d=6                         } catch (\Throwable $e) {
+0262 d=6                             \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to write local copy of pdf', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0263 d=5                         }
+0264 d=5 
+0265 d=5                         // Also copy to public/reports for easy browser access
+0266 d=6                         try {
+0267 d=6                             $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr);
+0268 d=6                             if (! is_dir($publicPdfDir)) { $ensureDir($publicPdfDir); }
+0269 d=6                             $publicPath = $publicPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0270 d=6                             @file_put_contents($publicPath, $content);
+0271 d=6                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to public folder', ['path' => $publicPath, 'id' => $rec->id]);
+0272 d=6                         } catch (\Throwable $e) {
+0273 d=6                             \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to write pdf to public folder', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0274 d=5                         }
+0275 d=5 
+0276 d=5                         // If the preferred path isn't visible after write, try copying the local fallback to preferred (retries)
+0277 d=6                         try {
+0278 d=7                             if ((!file_exists($path) || filesize($path) === 0) && isset($localPath) && file_exists($localPath) && filesize($localPath) > 0) {
+0279 d=7                                 $copied = $verifyAndRetryCopy($localPath, $path, 3, 500);
+0280 d=8                                 if ($copied) {
+0281 d=8                                     \Illuminate\Support\Facades\Log::info('GenerateProductionReports: restored preferred pdf by copying local -> preferred', ['preferred' => $path, 'local' => $localPath, 'id' => $rec->id]);
+0282 d=8                                 } else {
+0283 d=8                                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to restore preferred pdf from local copy', ['preferred' => $path, 'local' => $localPath, 'id' => $rec->id]);
+0284 d=7                                 }
+0285 d=6                             }
+0286 d=6                         } catch (\Throwable $e) {
+0287 d=6                             \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: exception while attempting to restore preferred pdf', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0288 d=5                         }
+0289 d=5 
+0290 d=5                         $rec->downloaded_at = now();
+0291 d=5                         $rec->save();
+0292 d=5 
+0293 d=5                         continue;
+0294 d=4                     }
+0295 d=4 
+0296 d=4                     \Illuminate\Support\Facades\Log::error('GenerateProductionReports: pdf generation or write failed (no fallback succeeded)', ['id' => $rec->id, 'path' => $path]);
+0297 d=4                     continue;
+0298 d=4                 } catch (\Exception $e) {
+0299 d=4                     \Illuminate\Support\Facades\Log::error('GenerateProductionReports: pdf generation failed', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0300 d=4                     continue;
+0301 d=3                 }
+0302 d=3             } else {
+0303 d=3                 // Try to fall back to using the underlying Dompdf class if available.
+0304 d=4                 try {
+0305 d=5                     if (class_exists('\\Dompdf\\Dompdf')) {
+0306 d=5                         $html = view('pdf.production_control', $data)->render();
+0307 d=5                         $dompdf = new \Dompdf\Dompdf(['isRemoteEnabled' => true]);
+0308 d=5                         $dompdf->loadHtml($html);
+0309 d=5                         $dompdf->setPaper('A4', 'landscape');
+0310 d=5                         $dompdf->render();
+0311 d=5                         $content = $dompdf->output();
+0312 d=5 
+0313 d=5                         $path = $pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0314 d=5                         $written2 = false;
+0315 d=6                         try {
+0316 d=6                             $res = @file_put_contents($path, $content);
+0317 d=6                             $written2 = $res !== false;
+0318 d=6                         } catch (\Throwable $e) {
+0319 d=6                             $written2 = false;
+0320 d=5                         }
+0321 d=5 
+0322 d=6                         if (! $written2 && $saveRoot !== $fallbackRoot) {
+0323 d=7                             try {
+0324 d=7                                 $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+0325 d=7                                 if (! is_dir($fallbackPdfDir)) { $ensureDir($fallbackPdfDir); }
+0326 d=7                                 $fallbackPath = $fallbackPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0327 d=7                                 $res2 = @file_put_contents($fallbackPath, $content);
+0328 d=8                                 if ($res2 !== false) {
+0329 d=8                                     $files[] = $fallbackPath;
+0330 d=8                                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: pdf write to preferred path failed, wrote to fallback (dompdf class)', ['preferred' => $path, 'fallback' => $fallbackPath, 'id' => $rec->id]);
+0331 d=8 
+0332 d=8                                     $rec->downloaded_at = now();
+0333 d=8                                     $rec->save();
+0334 d=8                                     continue;
+0335 d=7                                 }
+0336 d=7                             } catch (\Throwable $e) {
+0337 d=7                                 \Illuminate\Support\Facades\Log::error('GenerateProductionReports: pdf fallback write error (dompdf class)', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0338 d=6                             }
+0339 d=5                         }
+0340 d=5 
+0341 d=6                         if ($written2) {
+0342 d=6                             $files[] = $path;
+0343 d=6                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf written (dompdf class)', ['path' => $path, 'id' => $rec->id]);
+0344 d=6 
+0345 d=6                             // local copy
+0346 d=7                             try {
+0347 d=7                                 $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+0348 d=7                                 if (! is_dir($localPdfDir)) { $ensureDir($localPdfDir); }
+0349 d=7                                 $localPath = $localPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0350 d=7                                 @file_put_contents($localPath, $content);
+0351 d=7                                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to local fallback (dompdf class)', ['path' => $localPath, 'id' => $rec->id]);
+0352 d=7                             } catch (\Throwable $e) {
+0353 d=7                                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to write local copy of pdf (dompdf class)', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0354 d=6                             }
+0355 d=6 
+0356 d=6                             // Also copy to public/reports for easy browser access (dompdf class)
+0357 d=7                             try {
+0358 d=7                                 $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr);
+0359 d=7                                 if (! is_dir($publicPdfDir)) { $ensureDir($publicPdfDir); }
+0360 d=7                                 $publicPath = $publicPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
+0361 d=7                                 @file_put_contents($publicPath, $content);
+0362 d=7                                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to public folder (dompdf class)', ['path' => $publicPath, 'id' => $rec->id]);
+0363 d=7                             } catch (\Throwable $e) {
+0364 d=7                                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to write pdf to public folder (dompdf class)', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0365 d=6                             }
+0366 d=6 
+0367 d=6                             // If the preferred path isn't visible after write, try copying the local fallback to preferred (retries)
+0368 d=7                             try {
+0369 d=8                                 if ((!file_exists($path) || filesize($path) === 0) && isset($localPath) && file_exists($localPath) && filesize($localPath) > 0) {
+0370 d=8                                     $copied = $verifyAndRetryCopy($localPath, $path, 3, 500);
+0371 d=9                                     if ($copied) {
+0372 d=9                                         \Illuminate\Support\Facades\Log::info('GenerateProductionReports: restored preferred pdf by copying local -> preferred (dompdf class)', ['preferred' => $path, 'local' => $localPath, 'id' => $rec->id]);
+0373 d=9                                     } else {
+0374 d=9                                         \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to restore preferred pdf from local copy (dompdf class)', ['preferred' => $path, 'local' => $localPath, 'id' => $rec->id]);
+0375 d=8                                     }
+0376 d=7                                 }
+0377 d=7                             } catch (\Throwable $e) {
+0378 d=7                                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: exception while attempting to restore preferred pdf (dompdf class)', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0379 d=6                             }
+0380 d=6 
+0381 d=6                             $rec->downloaded_at = now();
+0382 d=6                             $rec->save();
+0383 d=6 
+0384 d=6                             continue;
+0385 d=5                         }
+0386 d=4                     }
+0387 d=4                 } catch (\Throwable $e) {
+0388 d=4                     \Illuminate\Support\Facades\Log::error('GenerateProductionReports: dompdf class fallback failed', ['id' => $rec->id, 'error' => $e->getMessage()]);
+0389 d=3                 }
+0390 d=3 
+0391 d=3                 \Illuminate\Support\Facades\Log::error('GenerateProductionReports: dompdf.wrapper not bound and dompdf class unavailable, cannot create pdf', ['id' => $rec->id]);
+0392 d=3                 continue;
+0393 d=2             }
+0394 d=1         }
+0395 d=1 
+0396 d=1         // Build groups keyed by year_month to avoid mixing different years
+0397 d=2         foreach ($records as $rec) {
+0398 d=2             $recordDate = ! empty($rec->date) ? Carbon::parse($rec->date) : now();
+0399 d=2             $monthKey = $recordDate->format('Y_m'); // e.g. 2026_01
+0400 d=2             $monthName = strtolower($monthNames[(int) $recordDate->format('n')]);
+0401 d=2             $year = $recordDate->format('Y');
+0402 d=2 
+0403 d=2             $row = [
+0404 d=2                 // Meta
+0405 d=2                 'id' => $rec->id,
+0406 d=2                 'date' => ! empty($rec->date) ? Carbon::parse($rec->date)->format('Y-m-d') : '',
+0407 d=2                 'customer_name' => $rec->customer_name ?? (isset($rec->customer) && isset($rec->customer->name) ? $rec->customer->name : ''),
+0408 d=2                 'line' => $rec->line ?? '',
+0409 d=2                 'model' => $rec->model ?? '',
+0410 d=2                 'dj_number' => $rec->dj_number ?? '',
+0411 d=2                 'select_shift' => $rec->select_shift ?? $rec->shift ?? '',
+0412 d=2                 'select_group' => $rec->select_group ?? $rec->group ?? '',
+0413 d=2                 // Production
+0414 d=2                 'output' => $rec->output ?? '',
+0415 d=2                 'target_total' => $rec->target_total ?? '',
+0416 d=2                 'actual_total' => $rec->actual_total ?? '',
+0417 d=2                 'ng_total' => $rec->ng_total ?? '',
+0418 d=2                 'balance_total' => $rec->balance_total ?? '',
+0419 d=2                 'loss_total' => $rec->loss_total ?? '',
+0420 d=2                 'output_total_ok' => $rec->output_total_ok ?? '',
+0421 d=2                 'qty_ok' => $rec->qty_ok ?? '',
+0422 d=2                 'qty_ng' => $rec->qty_ng ?? '',
+0423 d=2                 // Quality and operators (arrays)
+0424 d=2                 'quality_information' => is_array($rec->quality_information ?? null) ? $rec->quality_information : ($rec->quality_information ? (json_decode($rec->quality_information, true) ?: []) : []),
+0425 d=2                 'operators' => is_array($rec->operators ?? null) ? $rec->operators : ($rec->operators ? (json_decode($rec->operators, true) ?: []) : []),
+0426 d=2                 // Approval
+0427 d=2                 'issued_sop' => $rec->issued_sop ?? '',
+0428 d=2                 'checked_leader' => $rec->checked_leader ?? '',
+0429 d=2                 'approved_spv' => $rec->approved_spv ?? '',
+0430 d=2             ];
+0431 d=2 
+0432 d=3             if (! isset($excelGroups[$monthKey])) {
+0433 d=3                 $excelGroups[$monthKey] = [
+0434 d=3                     'year' => $year,
+0435 d=3                     'month' => $monthName,
+0436 d=3                     'rows' => [],
+0437 d=3                 ];
+0438 d=2             }
+0439 d=2             $excelGroups[$monthKey]['rows'][] = $row;
+0440 d=1         }
+0441 d=1 
+0442 d=1         // --- CSV export: group rows by month and write .csv files with fixed headers ---
+0443 d=2         try {
+0444 d=2             // CSV export roots: prefer aaPanel csv folder, then Z: or UNC, else fallback
+0445 d=2             $preferredCsvRoot = 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS' . DIRECTORY_SEPARATOR . 'csv';
+0446 d=2             $preferredCsvRoot = ! empty($preferredCsvRoot) ? $preferredCsvRoot : null;
+0447 d=2 
+0448 d=2             $candidateCsvRoots = [];
+0449 d=2 
+0450 d=2             // Candidate 0: aaPanel csv folder
+0451 d=3             if (! empty($aapanelCsvRoot)) {
+0452 d=3                 $candidateCsvRoots[] = [
+0453 d=3                     'path' => $aapanelCsvRoot,
+0454 d=3                     'name' => 'aaPanel csv folder (AAPANEL_REPORTS_DIR/csv)',
+0455 d=3                 ];
+0456 d=2             }
+0457 d=2 
+0458 d=2             // Candidate 1: Z: drive csv folder
+0459 d=3             if (! empty($preferredCsvRoot)) {
+0460 d=3                 $candidateCsvRoots[] = [
+0461 d=3                     'path' => $preferredCsvRoot,
+0462 d=3                     'name' => 'Z: csv folder',
+0463 d=3                 ];
+0464 d=2             }
+0465 d=2 
+0466 d=2             // Candidate 2: UNC csv folder
+0467 d=2             $uncCsvPath = '\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS\\csv';
+0468 d=2             $candidateCsvRoots[] = [
+0469 d=2                 'path' => $uncCsvPath,
+0470 d=2                 'name' => 'UNC csv folder',
+0471 d=2             ];
+0472 d=2 
+0473 d=2             $csvRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports') . DIRECTORY_SEPARATOR . 'csv');
+0474 d=2             $csvRoot = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $csvRoot), DIRECTORY_SEPARATOR);
+0475 d=2 
+0476 d=2             $selectedCsvRoot = null;
+0477 d=2 
+0478 d=3             foreach ($candidateCsvRoots as $candidate) {
+0479 d=3                 $cand = $candidate['path'];
+0480 d=3                 $candName = $candidate['name'];
+0481 d=3 
+0482 d=3                 if (empty($cand)) { continue; }
+0483 d=3 
+0484 d=4                 if ($testWritable($cand)) {
+0485 d=4                     $selectedCsvRoot = $cand;
+0486 d=4                     $csvRoot = $selectedCsvRoot;
+0487 d=4                     \Illuminate\Support\Facades\Log::info('GenerateProductionReports: berhasil memilih preferred csv root', ['path' => $csvRoot, 'type' => $candName]);
+0488 d=4                     break;
+0489 d=4                 } else {
+0490 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: candidate csv root tidak writable, skip', ['candidate' => $cand, 'type' => $candName]);
+0491 d=3                 }
+0492 d=2             }
+0493 d=2 
+0494 d=3             if ($selectedCsvRoot === null) {
+0495 d=3                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: tidak ada preferred csv root tersedia, gunakan local storage fallback', ['fallback' => $csvRoot]);
+0496 d=2             }
+0497 d=2 
+0498 d=2             $MAX_QUALITY = config('report.max_quality_columns', 5);
+0499 d=2             $MAX_OPERATORS = config('report.max_operators', 10);
+0500 d=2 
+0501 d=2             $labelMap = [
+0502 d=2                 // Meta
+0503 d=2                 'id' => 'ID',
+0504 d=2                 'date' => 'Date',
+0505 d=2                 'customer_name' => 'Customer',
+0506 d=2                 'line' => 'Line',
+0507 d=2                 'model' => 'Model',
+0508 d=2                 'dj_number' => 'DJ Number',
+0509 d=2                 'select_shift' => 'Shift',
+0510 d=2                 'select_group' => 'Group',
+0511 d=2                 // Production
+0512 d=2                 'output' => 'Output',
+0513 d=2                 'target_total' => 'Target Total',
+0514 d=2                 'actual_total' => 'Actual Total',
+0515 d=2                 'ng_total' => 'NG Total',
+0516 d=2                 'balance_total' => 'Balance Total',
+0517 d=2                 'loss_total' => 'Loss Total',
+0518 d=2                 'output_total_ok' => 'Total Output',
+0519 d=2                 // Approval
+0520 d=2                 'issued_sop' => 'Issued SO',
+0521 d=2                 'checked_leader' => 'Leader',
+0522 d=2                 'approved_spv' => 'SPV',
+0523 d=2             ];
+0524 d=2 
+0525 d=2             $subLabelMap = [
+0526 d=2                 'process' => 'Process',
+0527 d=2                 'ng_item' => 'NG Item',
+0528 d=2                 'loc' => 'Location',
+0529 d=2                 'qty' => 'QTY',
+0530 d=2                 'results_qc' => 'Result',
+0531 d=2                 'sop_line' => 'SOP/LDR',
+0532 d=2                 'ipqc' => 'IPQC',
+0533 d=2                 'remarks_qc' => 'Remarks',
+0534 d=2                 'remarks' => 'Remarks',
+0535 d=2                 'technician' => 'Technician',
+0536 d=2                 'time' => 'Time',
+0537 d=2                 'name' => 'Name'
+0538 d=2             ];
+0539 d=2 
+0540 d=2             // Order must follow the desired CSV layout (metadata -> production -> quality blocks -> operators -> approval)
+0541 d=2             $fixedFields = [
+0542 d=2                 'id','date','customer_name','line','model','dj_number','select_shift','select_group',
+0543 d=2                 'output','target_total','actual_total','ng_total','balance_total','loss_total','output_total_ok',
+0544 d=2                 'issued_sop','checked_leader','approved_spv'
+0545 d=2             ];
+0546 d=2 
+0547 d=2             $qualitySub = ['process','ng_item','loc','qty','results_qc','sop_line','ipqc','remarks_qc'];
+0548 d=2             $operatorSub = ['process','name'];
+0549 d=2 
+0550 d=3             foreach ($excelGroups as $monthKey => $group) {
+0551 d=3                 $rows = $group['rows'] ?? [];
+0552 d=3                 if (empty($rows)) { continue; }
+0553 d=3 
+0554 d=3                 $year = $group['year'];
+0555 d=3                 $monthName = $group['month'];
+0556 d=3 
+0557 d=3                 $monthDir = $csvRoot . DIRECTORY_SEPARATOR . $monthName;
+0558 d=4                 if (! is_dir($monthDir)) {
+0559 d=4                     $mkRes = $ensureDir($monthDir);
+0560 d=5                     if (! $mkRes) {
+0561 d=5                         \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create month directory untuk CSV', ['dir' => $monthDir]);
+0562 d=4                     }
+0563 d=3                 }
+0564 d=3 
+0565 d=3                 $csvPath = $monthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
+0566 d=3 
+0567 d=3                 // build two-row header: primary header (group titles) and sub-header (field titles)
+0568 d=3                 $primaryHeader = [];
+0569 d=3                 $subHeader = [];
+0570 d=3 
+0571 d=3                 // Fixed (non-array) fields: group into logical primary sections and put actual field labels in subheader
+0572 d=3                 $metaFields = ['id','date','customer_name','line','model','dj_number','select_shift','select_group'];
+0573 d=3                 $productionFields = ['output','target_total','actual_total','ng_total','balance_total','loss_total','output_total_ok'];
+0574 d=3                 $approvalFields = ['issued_sop','checked_leader','approved_spv'];
+0575 d=3 
+0576 d=4                 foreach ($fixedFields as $f) {
+0577 d=4                     $label = $labelMap[$f] ?? ucfirst(str_replace('_', ' ', $f));
+0578 d=5                     if (in_array($f, $metaFields, true)) {
+0579 d=5                         $primaryHeader[] = 'Meta';
+0580 d=5                     } elseif (in_array($f, $productionFields, true)) {
+0581 d=5                         $primaryHeader[] = 'Production';
+0582 d=5                     } elseif (in_array($f, $approvalFields, true)) {
+0583 d=5                         $primaryHeader[] = 'Approval';
+0584 d=5                     } else {
+0585 d=5                         $primaryHeader[] = '';
+0586 d=4                     }
+0587 d=4                     $subHeader[] = $label;
+0588 d=3                 }
+0589 d=3 
+0590 d=3                 // Quality sub-columns: primary header 'Quality 1' etc, subheader uses sub labels
+0591 d=4                 for ($i = 1; $i <= $MAX_QUALITY; $i++) {
+0592 d=5                     foreach ($qualitySub as $sub) {
+0593 d=5                         $primaryHeader[] = "Quality {$i}";
+0594 d=5                         $subHeader[] = ($subLabelMap[$sub] ?? ucfirst($sub));
+0595 d=4                     }
+0596 d=3                 }
+0597 d=3 
+0598 d=3                 // Operator sub-columns
+0599 d=4                 for ($i = 1; $i <= $MAX_OPERATORS; $i++) {
+0600 d=5                     foreach ($operatorSub as $sub) {
+0601 d=5                         $primaryHeader[] = "Operator {$i}";
+0602 d=5                         $subHeader[] = ($subLabelMap[$sub] ?? ucfirst($sub));
+0603 d=4                     }
+0604 d=3                 }
+0605 d=3 
+0606 d=3                 // Normalize rows
+0607 d=4                 foreach ($rows as &$r) {
+0608 d=5                     if (! isset($r['quality_information']) || ! is_array($r['quality_information'])) {
+0609 d=5                         $r['quality_information'] = is_string($r['quality_information']) ? (@json_decode($r['quality_information'], true) ?: []) : [];
+0610 d=4                     }
+0611 d=5                     if (! isset($r['operators']) || ! is_array($r['operators'])) {
+0612 d=5                         $r['operators'] = is_string($r['operators']) ? (@json_decode($r['operators'], true) ?: []) : [];
+0613 d=4                     }
+0614 d=4                     // normalize date to Y-m-d string for CSV
+0615 d=4                     $r['date'] = ! empty($r['date']) ? Carbon::parse($r['date'])->format('Y-m-d') : '';
+0616 d=3                 }
+0617 d=3                 unset($r);
+0618 d=3 
+0619 d=3                 // read existing IDs to avoid duplicates (handle two-row header)
+0620 d=3                 $existingIds = [];
+0621 d=4                 if (file_exists($csvPath) && filesize($csvPath) > 0) {
+0622 d=5                     if (($h = fopen($csvPath, 'r')) !== false) {
+0623 d=5                         $first = fgetcsv($h, 0, ',', '"', "\\");
+0624 d=5                         $second = fgetcsv($h, 0, ',', '"', "\\");
+0625 d=5                         $idIndex = false;
+0626 d=5                         // check both header rows for 'id' column
+0627 d=5                         $rowsToCheck = [];
+0628 d=5                         if ($first !== false) { $rowsToCheck[] = $first; }
+0629 d=5                         if ($second !== false) { $rowsToCheck[] = $second; }
+0630 d=6                         foreach ($rowsToCheck as $row) {
+0631 d=6                             $normalized = array_map(fn($c)=>strtolower(trim((string)$c)), $row);
+0632 d=6                             foreach ($normalized as $i => $col) { if ($col === 'id') { $idIndex = $i; break 2; } }
+0633 d=5                         }
+0634 d=6                         while (($line = fgetcsv($h, 0, ',', '"', "\\")) !== false) {
+0635 d=6                             if ($idIndex !== false && isset($line[$idIndex]) && $line[$idIndex] !== '') { $existingIds[(string)$line[$idIndex]] = true; }
+0636 d=5                         }
+0637 d=5                         fclose($h);
+0638 d=4                     }
+0639 d=3                 }
+0640 d=3 
+0641 d=3                 // open for append and write header if needed (use c+ with locking to avoid concurrency/permission issues)
+0642 d=3                 $intendedCsvPath = $csvPath; // remember the desired preferred location
+0643 d=3                 $csvOpenedPath = $csvPath;
+0644 d=3                 $fp = @fopen($csvOpenedPath, 'c+');
+0645 d=4                 if ($fp === false) {
+0646 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to open csv (c+) on chosen excel root', ['path' => $csvPath, 'excelRoot' => $excelRoot]);
+0647 d=4                     // fallback to storage fallback path
+0648 d=4                     $fallbackExcelRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports') . DIRECTORY_SEPARATOR . 'excel');
+0649 d=5                     if ($excelRoot !== $fallbackExcelRoot) {
+0650 d=6                         try {
+0651 d=6                             if (! is_dir($fallbackExcelRoot)) { @mkdir($fallbackExcelRoot, 0777, true); }
+0652 d=6                             $monthDir = $fallbackExcelRoot . DIRECTORY_SEPARATOR . $monthName;
+0653 d=6                             if (! is_dir($monthDir)) { @mkdir($monthDir, 0777, true); }
+0654 d=6                             $csvPathFallback = $monthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
+0655 d=6                             $fp = @fopen($csvPathFallback, 'c+');
+0656 d=7                             if ($fp !== false) {
+0657 d=7                                 \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: opened csv at fallback excel root', ['path' => $csvPathFallback]);
+0658 d=7                                 $csvOpenedPath = $csvPathFallback;
+0659 d=7                             } else {
+0660 d=7                                 \Illuminate\Support\Facades\Log::error('GenerateProductionReports: failed to open csv on fallback excel root (c+)', ['path' => $csvPathFallback]);
+0661 d=7                                 continue;
+0662 d=6                             }
+0663 d=6                         } catch (\Throwable $e) {
+0664 d=6                             \Illuminate\Support\Facades\Log::error('GenerateProductionReports: exception while attempting csv fallback', ['error' => $e->getMessage()]);
+0665 d=6                             continue;
+0666 d=5                         }
+0667 d=5                     } else {
+0668 d=5                         \Illuminate\Support\Facades\Log::error('GenerateProductionReports: failed to open csv for append and no further fallback available', ['path' => $csvPath]);
+0669 d=5                         continue;
+0670 d=4                     }
+0671 d=3                 }
+0672 d=3 
+0673 d=3                 // Acquire exclusive lock
+0674 d=3                 $locked = false;
+0675 d=4                 try {
+0676 d=4                     $locked = flock($fp, LOCK_EX);
+0677 d=4                 } catch (\Throwable $e) {
+0678 d=4                     $locked = false;
+0679 d=3                 }
+0680 d=4                 if (! $locked) {
+0681 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: could not lock csv file for writing', ['path' => $csvOpenedPath]);
+0682 d=4                     fclose($fp);
+0683 d=4                     continue;
+0684 d=3                 }
+0685 d=3 
+0686 d=3                 // Read existing IDs safely (account for two-row header)
+0687 d=3                 $existingIds = [];
+0688 d=4                 try {
+0689 d=4                     rewind($fp);
+0690 d=4                     $first = fgetcsv($fp, 0, ',', '"', "\\");
+0691 d=4                     $second = fgetcsv($fp, 0, ',', '"', "\\");
+0692 d=4                     $idIndex = false;
+0693 d=4                     $rowsToCheck = [];
+0694 d=4                     if ($first !== false) { $rowsToCheck[] = $first; }
+0695 d=4                     if ($second !== false) { $rowsToCheck[] = $second; }
+0696 d=5                     foreach ($rowsToCheck as $row) {
+0697 d=5                         $normalized = array_map(fn($c)=>strtolower(trim((string)$c)), $row);
+0698 d=5                         foreach ($normalized as $i => $col) { if ($col === 'id') { $idIndex = $i; break 2; } }
+0699 d=4                     }
+0700 d=5                     while (($line = fgetcsv($fp, 0, ',', '"', "\\")) !== false) {
+0701 d=5                         if ($idIndex !== false && isset($line[$idIndex]) && $line[$idIndex] !== '') { $existingIds[(string)$line[$idIndex]] = true; }
+0702 d=4                     }
+0703 d=4                 } catch (\Throwable $e) {
+0704 d=4                     // non-fatal: continue with empty existingIds
+0705 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: error reading existing csv rows', ['path' => $csvOpenedPath, 'error' => $e->getMessage()]);
+0706 d=3                 }
+0707 d=3 
+0708 d=3                 // Move to end for append
+0709 d=3                 fseek($fp, 0, SEEK_END);
+0710 d=3 
+0711 d=3                 // Determine if we need header (file empty or just created)
+0712 d=3                 $stat = fstat($fp);
+0713 d=3                 $needHeader = ($stat['size'] ?? 0) === 0;
+0714 d=3 
+0715 d=4                 if ($needHeader) {
+0716 d=4                     // write two header rows: primary (group) and subheader
+0717 d=4                     fputcsv($fp, $primaryHeader);
+0718 d=4                     fputcsv($fp, $subHeader);
+0719 d=3                 }
+0720 d=3 
+0721 d=3                 // write new rows
+0722 d=4                 foreach ($rows as $r) {
+0723 d=4                     $rid = (string)($r['id'] ?? '');
+0724 d=4                     if ($rid !== '' && isset($existingIds[$rid])) { continue; }
+0725 d=4 
+0726 d=4                     $out = [];
+0727 d=5                     foreach ($fixedFields as $f) {
+0728 d=5                         $val = $r[$f] ?? '';
+0729 d=5                         if (is_array($val) || is_object($val)) { $val = @json_encode($val); }
+0730 d=5                         $out[] = $val;
+0731 d=4                     }
+0732 d=4 
+0733 d=5                     for ($i = 0; $i < $MAX_QUALITY; $i++) {
+0734 d=5                         $item = $r['quality_information'][$i] ?? [];
+0735 d=6                         foreach ($qualitySub as $sub) {
+0736 d=6                             $val = '';
+0737 d=6                             if (is_array($item) && array_key_exists($sub, $item)) { $val = $item[$sub]; }
+0738 d=6                             if (is_array($val) || is_object($val)) { $val = @json_encode($val); }
+0739 d=6                             $out[] = $val;
+0740 d=5                         }
+0741 d=4                     }
+0742 d=4 
+0743 d=5                     for ($i = 0; $i < $MAX_OPERATORS; $i++) {
+0744 d=5                         $item = $r['operators'][$i] ?? [];
+0745 d=6                         foreach ($operatorSub as $sub) {
+0746 d=6                             $val = '';
+0747 d=6                             if (is_array($item) && array_key_exists($sub, $item)) { $val = $item[$sub]; }
+0748 d=6                             if (is_array($val) || is_object($val)) { $val = @json_encode($val); }
+0749 d=6                             $out[] = $val;
+0750 d=5                         }
+0751 d=4                     }
+0752 d=4 
+0753 d=5                     if (false === fputcsv($fp, $out)) {
+0754 d=5                         \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to write csv row', ['path' => $csvOpenedPath, 'id' => $rid]);
+0755 d=4                     }
+0756 d=3                 }
+0757 d=3 
+0758 d=3                 fflush($fp);
+0759 d=3                 flock($fp, LOCK_UN);
+0760 d=3                 fclose($fp);
+0761 d=3 
+0762 d=3                 // ensure $csvPath reflects the actual opened file (may be fallback)
+0763 d=3                 $csvPath = $csvOpenedPath;
+0764 d=3 
+0765 d=3                 // If we wrote to the preferred excel root, also copy a local fallback to storage/app/reports/excel
+0766 d=4                 try {
+0767 d=4                     $fallbackExcelRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports') . DIRECTORY_SEPARATOR . 'excel');
+0768 d=5                     if ($excelRoot !== $fallbackExcelRoot) {
+0769 d=5                         if (! is_dir($fallbackExcelRoot)) { @mkdir($fallbackExcelRoot, 0777, true); }
+0770 d=5                         $fallbackMonthDir = $fallbackExcelRoot . DIRECTORY_SEPARATOR . $monthName;
+0771 d=5                         if (! is_dir($fallbackMonthDir)) { @mkdir($fallbackMonthDir, 0777, true); }
+0772 d=5                         $fallbackCsvPath = $fallbackMonthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
+0773 d=5                         if (file_exists($csvPath)) { @copy($csvPath, $fallbackCsvPath); }
+0774 d=5                         \Illuminate\Support\Facades\Log::info('GenerateProductionReports: csv also copied to local fallback', ['path' => $fallbackCsvPath, 'source' => $csvPath]);
+0775 d=5 
+0776 d=5                         // If we actually wrote to fallback (opened path differs from intended), try to restore to preferred location
+0777 d=6                         try {
+0778 d=7                             if ($csvOpenedPath !== ($intendedCsvPath ?? '') && file_exists($fallbackCsvPath) && filesize($fallbackCsvPath) > 0) {
+0779 d=7                                 $restored = $verifyAndRetryCopy($fallbackCsvPath, $intendedCsvPath ?? $csvPath, 3, 500);
+0780 d=8                                 if ($restored) {
+0781 d=8                                     \Illuminate\Support\Facades\Log::info('GenerateProductionReports: restored preferred csv by copying fallback -> preferred', ['preferred' => $intendedCsvPath, 'fallback' => $fallbackCsvPath]);
+0782 d=8                                 } else {
+0783 d=8                                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to restore preferred csv from fallback', ['preferred' => $intendedCsvPath, 'fallback' => $fallbackCsvPath]);
+0784 d=7                                 }
+0785 d=6                             }
+0786 d=6                         } catch (\Throwable $e) {
+0787 d=6                             \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: exception while attempting to restore preferred csv', ['error' => $e->getMessage()]);
+0788 d=5                         }
+0789 d=4                     }
+0790 d=4                 } catch (\Throwable $e) {
+0791 d=4                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to copy csv to local fallback', ['error' => $e->getMessage()]);
+0792 d=3                 }
+0793 d=3 
+0794 d=3                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: csv written', ['path' => $csvPath, 'rows_written' => count($rows)]);
+0795 d=2             }
+0796 d=2         } catch (\Exception $e) {
+0797 d=2             \Illuminate\Support\Facades\Log::error('GenerateProductionReports: csv export error: ' . $e->getMessage());
+0798 d=1         }
+0799 d=1         // ZIP creation and separate export CSVs removed per user request
+0800 d=0     }
+0801 d=-1 }
+0802 d=-1 
+Final depth: -1
