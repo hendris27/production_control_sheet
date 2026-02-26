@@ -204,8 +204,11 @@ class GenerateProductionReports implements ShouldQueue
             $customerName = $rec->customer_name ?? (isset($rec->customer) && isset($rec->customer->name) ? $rec->customer->name : 'unknown');
             $safeCustomer = preg_replace('/[^A-Za-z0-9\-\._]+/', '-', $customerName);
             $safeCustomer = trim($safeCustomer, '-._');
-            // default filename base: customer-dj_or_id-date
-            $filenameBase = $safeCustomer . '-' . ($rec->dj_number ?? $rec->id) . '-' . $dateStr;
+            // default filename base as requested: shift_-line-nama model
+            $shiftPart = $rec->select_shift ?? $rec->shift ?? '';
+            $linePart = $rec->line ?? '';
+            $modelPart = $rec->model ?? '';
+            $filenameBase = 'shift_' . ($shiftPart !== '' ? $shiftPart : 'unknown') . '-line_' . ($linePart !== '' ? $linePart : 'unknown') . '-' . ($modelPart !== '' ? $modelPart : 'unknown');
             // dataset for view rendering
             $data = is_array($rec) ? $rec : (method_exists($rec, 'toArray') ? $rec->toArray() : (array)$rec);
 
@@ -217,7 +220,8 @@ class GenerateProductionReports implements ShouldQueue
 
             // Build PDF directory with proper path handling for Windows UNC/mapped drives
             // store PDFs under a top-level 'pdf' folder: preferred_root/pdf/<bulan>/<customer>/<tanggal>
-            $pdfDir = $saveRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+            $rootForPdf = (strtolower(basename($saveRoot)) === 'pdf') ? $saveRoot : $saveRoot . DIRECTORY_SEPARATOR . 'pdf';
+            $pdfDir = $rootForPdf . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
             if (! is_dir($pdfDir)) {
                 $mkdirRes = $ensureDir($pdfDir);
                 if (! $mkdirRes) {
