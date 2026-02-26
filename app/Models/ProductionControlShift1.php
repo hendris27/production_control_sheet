@@ -82,6 +82,7 @@ class ProductionControlShift1 extends Model
     {
         $list = [
             'FV',
+            'FCT',
             'MI',
             'PRESS',
             'VMI',
@@ -90,7 +91,6 @@ class ProductionControlShift1 extends Model
             'HEATING',
             'COATING',
             'GREASE',
-            'FCT',
             'LED TEST',
             'SELECTIVE',
             'ROOMWRITE',
