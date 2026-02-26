@@ -53,6 +53,7 @@ return new class extends Migration
             $table->time('start_time')->nullable();
             $table->time('end_time')->nullable();
             $table->integer('output')->nullable()->default(0);
+            $table->integer('output_total_ok')->nullable()->default(0);
 
             // Totals (untuk display/calculation)
             $table->integer('target_total')->nullable()->default(0);
