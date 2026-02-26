@@ -48,8 +48,11 @@ class GenerateProductionReports implements ShouldQueue
         // preferred_root: target (Z:\PROD\REPORT PCS - mapped drive)
         // fallback_subdir: subfolder di storage/app jika preferred tidak tersedia
         $preferredRoot = 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS';
-        // normalize preferredRoot separators
+        // aaPanel default path Anda (jika ingin hardcoded) dan juga dapat di-override via .env AAPANEL_REPORTS_DIR
+        $aapanelRoot = env('AAPANEL_REPORTS_DIR', '/www/wwwroot/production_control_sheet/storage/app/reports');
+        // normalize preferredRoot / aapanelRoot separators
         $preferredRoot = $preferredRoot ? rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $preferredRoot), DIRECTORY_SEPARATOR) : null;
+        $aapanelRoot = $aapanelRoot ? rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $aapanelRoot), DIRECTORY_SEPARATOR) : null;
         $fallbackRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports'));
         $fallbackRoot = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $fallbackRoot), DIRECTORY_SEPARATOR);
 
@@ -88,6 +91,22 @@ class GenerateProductionReports implements ShouldQueue
             }
         };
 
+        // Helper to ensure a directory exists and attempt to set permissive permissions
+        $ensureDir = function (string $dir) {
+            try {
+                $dir = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $dir), DIRECTORY_SEPARATOR);
+                if (! is_dir($dir)) {
+                    @mkdir($dir, 0777, true);
+                }
+                // Try to set permissive mode where possible (no-op on some systems)
+                try { @chmod($dir, 0777); } catch (\Throwable $__e) { }
+                return is_dir($dir);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: ensureDir exception', ['dir' => $dir, 'error' => $e->getMessage()]);
+                return false;
+            }
+        };
+
         // Helper to attempt copying a file with retries and small delays
         $verifyAndRetryCopy = function (string $source, string $dest, int $attempts = 3, int $delayMs = 500) {
             try {
@@ -114,11 +133,19 @@ class GenerateProductionReports implements ShouldQueue
             return false;
         };
 
-        // Attempt preferred roots dalam urutan: Z: drive, UNC path, fallback ke storage lokal
+        // Attempt preferred roots dalam urutan: aaPanel path, Z: drive, UNC path, fallback ke storage lokal
         $candidatePreferredRoots = [];
 
+        // Candidate 0: aaPanel path (direkomendasikan oleh user)
+        if (! empty($aapanelRoot)) {
+            $candidatePreferredRoots[] = [
+                'path' => $aapanelRoot,
+                'name' => 'aaPanel folder (AAPANEL_REPORTS_DIR)',
+            ];
+        }
+
         // Candidate 1: Z: mapped drive
-        if (!empty($preferredRoot)) {
+        if (! empty($preferredRoot)) {
             $candidatePreferredRoots[] = [
                 'path' => $preferredRoot,
                 'name' => 'Z: mapped drive',
@@ -126,7 +153,7 @@ class GenerateProductionReports implements ShouldQueue
         }
 
         // Candidate 2: UNC path (\\192.168.62.12\14 Prod-02\PROD\REPORT PCS)
-        $uncPath = '\\\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS';
+        $uncPath = '\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS';
         $candidatePreferredRoots[] = [
             'path' => $uncPath,
             'name' => 'UNC network share',
@@ -220,9 +247,9 @@ class GenerateProductionReports implements ShouldQueue
             // Build PDF directory with proper path handling for Windows UNC/mapped drives
             // store PDFs under a top-level 'pdf' folder: preferred_root/pdf/<bulan>/<customer>/<tanggal>
             $pdfDir = $saveRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
-            if (! @is_dir($pdfDir)) {
-                $mkdirRes = @mkdir($pdfDir, 0777, true);
-                if (!$mkdirRes) {
+            if (! is_dir($pdfDir)) {
+                $mkdirRes = $ensureDir($pdfDir);
+                if (! $mkdirRes) {
                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create PDF directory', ['dir' => $pdfDir, 'id' => $rec->id]);
                 }
             }
@@ -250,7 +277,7 @@ class GenerateProductionReports implements ShouldQueue
                     if (! $written && $saveRoot !== $fallbackRoot) {
                         try {
                             $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
-                            if (! is_dir($fallbackPdfDir)) { @mkdir($fallbackPdfDir, 0777, true); }
+                            if (! is_dir($fallbackPdfDir)) { $ensureDir($fallbackPdfDir); }
                             $fallbackPath = $fallbackPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             $res2 = @file_put_contents($fallbackPath, $content);
                             if ($res2 !== false) {
@@ -273,7 +300,7 @@ class GenerateProductionReports implements ShouldQueue
                         // Also ensure a local copy exists under storage fallback for easy access
                         try {
                             $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
-                            if (! is_dir($localPdfDir)) { @mkdir($localPdfDir, 0777, true); }
+                            if (! is_dir($localPdfDir)) { $ensureDir($localPdfDir); }
                             $localPath = $localPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             @file_put_contents($localPath, $content);
                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to local fallback', ['path' => $localPath, 'id' => $rec->id]);
@@ -284,7 +311,7 @@ class GenerateProductionReports implements ShouldQueue
                         // Also copy to public/reports for easy browser access
                         try {
                             $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr);
-                            if (! is_dir($publicPdfDir)) { @mkdir($publicPdfDir, 0777, true); }
+                            if (! is_dir($publicPdfDir)) { $ensureDir($publicPdfDir); }
                             $publicPath = $publicPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             @file_put_contents($publicPath, $content);
                             \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to public folder', ['path' => $publicPath, 'id' => $rec->id]);
@@ -341,7 +368,7 @@ class GenerateProductionReports implements ShouldQueue
                         if (! $written2 && $saveRoot !== $fallbackRoot) {
                             try {
                                 $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
-                                if (! is_dir($fallbackPdfDir)) { @mkdir($fallbackPdfDir, 0777, true); }
+                                if (! is_dir($fallbackPdfDir)) { $ensureDir($fallbackPdfDir); }
                                 $fallbackPath = $fallbackPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                                 $res2 = @file_put_contents($fallbackPath, $content);
                                 if ($res2 !== false) {
@@ -364,7 +391,7 @@ class GenerateProductionReports implements ShouldQueue
                             // local copy
                             try {
                                 $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
-                                if (! is_dir($localPdfDir)) { @mkdir($localPdfDir, 0777, true); }
+                                if (! is_dir($localPdfDir)) { $ensureDir($localPdfDir); }
                                 $localPath = $localPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                                 @file_put_contents($localPath, $content);
                                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to local fallback (dompdf class)', ['path' => $localPath, 'id' => $rec->id]);
@@ -375,7 +402,7 @@ class GenerateProductionReports implements ShouldQueue
                             // Also copy to public/reports for easy browser access (dompdf class)
                             try {
                                 $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr);
-                                if (! is_dir($publicPdfDir)) { @mkdir($publicPdfDir, 0777, true); }
+                                if (! is_dir($publicPdfDir)) { $ensureDir($publicPdfDir); }
                                 $publicPath = $publicPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                                 @file_put_contents($publicPath, $content);
                                 \Illuminate\Support\Facades\Log::info('GenerateProductionReports: pdf also written to public folder (dompdf class)', ['path' => $publicPath, 'id' => $rec->id]);
@@ -461,12 +488,26 @@ class GenerateProductionReports implements ShouldQueue
         // --- CSV export: group rows by month and write .csv files with fixed headers ---
         try {
             $preferredExcelRoot = 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS' . DIRECTORY_SEPARATOR . 'excel';
-            $preferredExcelRoot = !empty($preferredExcelRoot) ? $preferredExcelRoot : null;
+            $preferredExcelRoot = ! empty($preferredExcelRoot) ? $preferredExcelRoot : null;
+            // aaPanel excel subfolder (gunakan base aapanelRoot jika ada)
+            $aapanelExcelRoot = null;
+            if (! empty($aapanelRoot)) {
+                $aapanelExcelRoot = $aapanelRoot . DIRECTORY_SEPARATOR . 'excel';
+                $aapanelExcelRoot = rtrim(str_replace(['\\','/'], DIRECTORY_SEPARATOR, $aapanelExcelRoot), DIRECTORY_SEPARATOR);
+            }
 
             $candidateExcelRoots = [];
 
+            // Candidate 0: aaPanel excel folder
+            if (! empty($aapanelExcelRoot)) {
+                $candidateExcelRoots[] = [
+                    'path' => $aapanelExcelRoot,
+                    'name' => 'aaPanel excel folder (AAPANEL_REPORTS_DIR/excel)',
+                ];
+            }
+
             // Candidate 1: Z: drive excel folder
-            if (!empty($preferredExcelRoot)) {
+            if (! empty($preferredExcelRoot)) {
                 $candidateExcelRoots[] = [
                     'path' => $preferredExcelRoot,
                     'name' => 'Z: excel folder',
@@ -474,7 +515,7 @@ class GenerateProductionReports implements ShouldQueue
             }
 
             // Candidate 2: UNC excel folder
-            $uncExcelPath = '\\\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS\\excel';
+            $uncExcelPath = '\\192.168.62.12\\14 Prod-02\\PROD\\REPORT PCS\\csv';
             $candidateExcelRoots[] = [
                 'path' => $uncExcelPath,
                 'name' => 'UNC excel folder',
@@ -565,9 +606,9 @@ class GenerateProductionReports implements ShouldQueue
                 $monthName = $group['month'];
 
                 $monthDir = $excelRoot . DIRECTORY_SEPARATOR . $monthName;
-                if (! @is_dir($monthDir)) {
-                    $mkRes = @mkdir($monthDir, 0777, true);
-                    if (!$mkRes) {
+                if (! is_dir($monthDir)) {
+                    $mkRes = $ensureDir($monthDir);
+                    if (! $mkRes) {
                         \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create month directory untuk CSV', ['dir' => $monthDir]);
                     }
                 }

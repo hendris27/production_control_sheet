@@ -65,20 +65,20 @@ class AdminPanelProvider extends PanelProvider
                             ]),
                     ])
 
-                     ->groups([
-                        \Filament\Navigation\NavigationGroup::make('Checksheet Machine')
-                                    ->icon('heroicon-o-wrench-screwdriver')
+                    //  ->groups([
+                    //     \Filament\Navigation\NavigationGroup::make('Checksheet Machine')
+                    //                 ->icon('heroicon-o-wrench-screwdriver')
 
-                            ->items([
-                                 NavigationItem::make('Selbo')
-                                    ->url('#'),
-                                      NavigationItem::make('Tekorobo')
-                                    ->url('#'),
-                                      NavigationItem::make('Robotic')
-                                    ->url('#'),
+                    //         ->items([
+                    //              NavigationItem::make('Selbo')
+                    //                 ->url('#'),
+                    //                   NavigationItem::make('Tekorobo')
+                    //                 ->url('#'),
+                    //                   NavigationItem::make('Robotic')
+                    //                 ->url('#'),
 
-                            ]),
-                    ])
+                    //         ]),
+                    // ])
 
 
                         ->items([
