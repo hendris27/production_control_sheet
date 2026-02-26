@@ -15,13 +15,13 @@ class ProcessSeeder extends Seeder
     {
         $names = [
             'FV',
-            'PRESS',
+            'MI',
             'VMI',
-            'ASSY/WELDING',
+            'ASSY',
             'HEATING',
             'COATING',
             'GREASE',
-            'FCT/ICT',
+            'FCT',
             'LED TEST',
             'SELECTIVE',
             'ROOMWRITE',
