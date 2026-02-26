@@ -206,11 +206,11 @@ class GenerateProductionReports implements ShouldQueue
             $safeCustomer = trim($safeCustomer, '-._');
             // default filename base as requested: shift_-line-nama model
             $shiftPart = $rec->select_shift ?? $rec->shift ?? '';
-            $linePart = $rec->line ?? '';
+            $groupPart = $rec->select_group ?? $rec->group ?? '';
             $modelPart = $rec->model ?? '';
-            $filenameBase = 'shift_' . ($shiftPart !== '' ? $shiftPart : 'unknown') . '-line_' . ($linePart !== '' ? $linePart : 'unknown') . '-' . ($modelPart !== '' ? $modelPart : 'unknown');
-            // dataset for view rendering
-            $data = is_array($rec) ? $rec : (method_exists($rec, 'toArray') ? $rec->toArray() : (array)$rec);
+            $filenameBase = 'shift_' . ($shiftPart !== '' ? $shiftPart : 'unknown') . '-group_' . ($groupPart !== '' ? $groupPart : 'unknown') . '-' . ($modelPart !== '' ? $modelPart : 'unknown');
+            // dataset for view rendering - provide `record` key for blade view
+            $data = ['record' => $rec];
 
             // sanitize filename (allow letters, numbers, dash, underscore, dot)
             $filenameBase = preg_replace('/[^A-Za-z0-9\-\._]+/', '-', $filenameBase);

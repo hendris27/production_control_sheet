@@ -22,14 +22,16 @@ class ProductionControlController extends Controller
         if (app()->bound('dompdf.wrapper')) {
             try {
                 $pdf = app('dompdf.wrapper')->loadView('pdf.production_control', $data);
-                $dateStr = optional($production_control->date)->format('d-m-Y') ?? now()->format('d-m-Y');
-                $customer = $production_control->customer_name ?? ($production_control->customer->name ?? 'customer');
-                $safeCustomer = preg_replace('/[^A-Za-z0-9]+/', '-', $customer);
-                $safeCustomer = trim($safeCustomer, '-');
-                $line = $production_control->line ?? 'line';
-                $safeLine = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $line);
-                $safeLine = trim($safeLine, '-');
-                $filename = $dateStr . '-' . $safeCustomer . '-' . $safeLine . '.pdf';
+                $shiftPart = $production_control->select_shift ?? $production_control->shift ?? 'unknown';
+                $groupPart = $production_control->select_group ?? $production_control->group ?? 'unknown';
+                $modelPart = $production_control->model ?? 'unknown';
+                $safeShift = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $shiftPart);
+                $safeGroup = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $groupPart);
+                $safeModel = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $modelPart);
+                $safeShift = trim($safeShift, '-');
+                $safeGroup = trim($safeGroup, '-');
+                $safeModel = trim($safeModel, '-');
+                $filename = 'shift_' . ($safeShift ?: 'unknown') . '-group_' . ($safeGroup ?: 'unknown') . '-' . ($safeModel ?: 'unknown') . '.pdf';
                 $content = $pdf->output();
 
                 // Preferred save path (config), fallback to storage/app/<subdir>
@@ -88,14 +90,16 @@ class ProductionControlController extends Controller
 
         // HTML fallback: render view and save into monthly folder, then return download
         $html = view('pdf.production_control', $data)->render();
-        $dateStr = optional($production_control->date)->format('d-m-Y') ?? now()->format('d-m-Y');
-        $customer = $production_control->customer_name ?? ($production_control->customer->name ?? 'customer');
-        $safeCustomer = preg_replace('/[^A-Za-z0-9]+/', '-', $customer);
-        $safeCustomer = trim($safeCustomer, '-');
-        $line = $production_control->line ?? 'line';
-        $safeLine = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $line);
-        $safeLine = trim($safeLine, '-');
-        $filename = $dateStr . '-' . $safeCustomer . '-' . $safeLine . '.html';
+        $shiftPart = $production_control->select_shift ?? $production_control->shift ?? 'unknown';
+        $groupPart = $production_control->select_group ?? $production_control->group ?? 'unknown';
+        $modelPart = $production_control->model ?? 'unknown';
+        $safeShift = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $shiftPart);
+        $safeGroup = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $groupPart);
+        $safeModel = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $modelPart);
+        $safeShift = trim($safeShift, '-');
+        $safeGroup = trim($safeGroup, '-');
+        $safeModel = trim($safeModel, '-');
+        $filename = 'shift_' . ($safeShift ?: 'unknown') . '-group_' . ($safeGroup ?: 'unknown') . '-' . ($safeModel ?: 'unknown') . '.html';
 
         // Preferred save path (konfigurasi) dan fallback lokal.
         // - `preferred_root` diambil dari config/report.php atau .env
