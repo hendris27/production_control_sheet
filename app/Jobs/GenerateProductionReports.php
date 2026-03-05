@@ -267,7 +267,7 @@ class GenerateProductionReports implements ShouldQueue
                     // If write failed and we're not already on the local fallback, try storage fallback
                     if (! $written && $saveRoot !== $fallbackRoot) {
                         try {
-                            $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+                            $fallbackPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer;
                             if (! is_dir($fallbackPdfDir)) { $ensureDir($fallbackPdfDir); }
                             $fallbackPath = $fallbackPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             $res2 = @file_put_contents($fallbackPath, $content);
@@ -290,7 +290,7 @@ class GenerateProductionReports implements ShouldQueue
 
                         // Also ensure a local copy exists under storage fallback for easy access
                         try {
-                            $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+                            $localPdfDir = $fallbackRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer;
                             if (! is_dir($localPdfDir)) { $ensureDir($localPdfDir); }
                             $localPath = $localPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             @file_put_contents($localPath, $content);
@@ -301,7 +301,7 @@ class GenerateProductionReports implements ShouldQueue
 
                         // Also copy to public/reports for easy browser access
                         try {
-                            $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr);
+                            $publicPdfDir = public_path('reports' . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer);
                             if (! is_dir($publicPdfDir)) { $ensureDir($publicPdfDir); }
                             $publicPath = $publicPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                             @file_put_contents($publicPath, $content);
@@ -324,7 +324,7 @@ class GenerateProductionReports implements ShouldQueue
                             // Additionally try copying local fallback to preferred top-level REPORT PCS under pdf/<month>/<customer>/<date>
                             $preferredTop = $preferredRoot;
                             if (! empty($preferredTop) && isset($localPath) && file_exists($localPath)) {
-                                $targetPrefPdfDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+                                $targetPrefPdfDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer;
                                 if (! is_dir($targetPrefPdfDir)) { $ensureDir($targetPrefPdfDir); }
                                 $targetPrefPdfPath = $targetPrefPdfDir . DIRECTORY_SEPARATOR . basename($localPath);
                                 $copied2 = $verifyAndRetryCopy($localPath, $targetPrefPdfPath, 3, 500);

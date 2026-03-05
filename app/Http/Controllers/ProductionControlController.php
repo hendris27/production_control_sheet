@@ -102,27 +102,23 @@ class ProductionControlController extends Controller
         $filename = '' . ($safeModel ?: 'unknown') . '-' . ($safeLine ?: 'unknown') . '-' . ($safeShift ?: 'unknown') . '-' . ($safeGroup ?: 'unknown') . '.html';
 
         // Get reliable save root using helper method
-        $saveRoot = $this->getReliableSaveRoot();
+        $shareRoot = $this->getReliableShareRoot();
 
         // Gunakan nama bulan (Bahasa Indonesia) berdasarkan tanggal record sehingga
         // setiap laporan tersimpan di folder bulan yang sesuai.
         $monthNames = [1=>'januari','februari','maret','april','mei','juni','juli','agustus','september','oktober','november','desember'];
         $recordDate = $production_control->date ?? now();
         $monthName = $monthNames[(int) $recordDate->format('n')];
-        $monthDir = $saveRoot . DIRECTORY_SEPARATOR . $monthName;
+        
         try {
-            if (! is_dir($monthDir)) {
-                mkdir($monthDir, 0777, true);
-            }
-            $path = $monthDir . DIRECTORY_SEPARATOR . $filename;
-            file_put_contents($path, $html);
-            // tambahan: simpan CSV dan Excel ke reliable share root
-            $shareRoot = $this->getReliableShareRoot();
-            $shareMonthDir = $shareRoot . DIRECTORY_SEPARATOR . $monthName;
-            try { if (! is_dir($shareMonthDir)) { mkdir($shareMonthDir, 0777, true); } } catch (\Throwable $_) {}
-            $csvDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'csv';
-            $excelDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'excel';
-            try { foreach ([$csvDir, $excelDir] as $d) { if (! is_dir($d)) { mkdir($d, 0777, true); } } } catch (\Throwable $_) {}
+            // CSV: shareRoot/csv/ (tanpa bulan)
+            $csvDir = $shareRoot . DIRECTORY_SEPARATOR . 'csv';
+            try { if (! is_dir($csvDir)) { mkdir($csvDir, 0777, true); } } catch (\Throwable $_) {}
+            
+            // Excel: shareRoot/excel/ (tanpa bulan)
+            $excelDir = $shareRoot . DIRECTORY_SEPARATOR . 'excel';
+            try { if (! is_dir($excelDir)) { mkdir($excelDir, 0777, true); } } catch (\Throwable $_) {}
+            
             $base = preg_replace('/\.html$/i','',$filename);
             try { $this->saveRecordCsv($production_control, $csvDir . DIRECTORY_SEPARATOR . $base . '.csv'); } catch (\Throwable $e) { Log::warning('Failed to save CSV', ['path' => $csvDir . DIRECTORY_SEPARATOR . $base . '.csv', 'error' => $e->getMessage()]); }
             try { $this->saveRecordExcel($production_control, $excelDir . DIRECTORY_SEPARATOR . $base . '.xlsx'); } catch (\Throwable $e) { Log::warning('Failed to save Excel', ['path' => $excelDir . DIRECTORY_SEPARATOR . $base . '.xlsx', 'error' => $e->getMessage()]); }
@@ -131,7 +127,7 @@ class ProductionControlController extends Controller
                 $production_control->save();
             } catch (\Exception $e) {
             }
-            return response()->download($path, basename($path));
+            return response()->streamDownload(fn() => $html, $filename);
         } catch (\Exception $e) {
             Log::warning('Failed to save HTML report to disk, returning inline HTML', ['error' => $e->getMessage()]);
             return response($html);
