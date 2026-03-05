@@ -38,48 +38,42 @@ class ProductionControlController extends Controller
                 $content = $pdf->output();
 
                 // Get reliable save root
-                $saveRoot = $this->getReliableSaveRoot();
+                $shareRoot = $this->getReliableShareRoot();
 
                 // use Indonesian month name for folder based on record date (e.g., 'januari')
                 $monthNames = [1=>'januari','februari','maret','april','mei','juni','juli','agustus','september','oktober','november','desember'];
                 $recordDate = $production_control->date ?? now();
                 $monthName = $monthNames[(int) $recordDate->format('n')];
-                // monthDir berdasarkan saveRoot yang sudah ditentukan di atas
-                $monthDir = $saveRoot . DIRECTORY_SEPARATOR . $monthName;
+                
                 try {
-                    // pastikan folder bulan ada
-                    if (! is_dir($monthDir)) { mkdir($monthDir, 0777, true); }
-                    // tulis PDF yang dihasilkan ke disk
-                    $path = $monthDir . DIRECTORY_SEPARATOR . $filename;
-                    file_put_contents($path, $content);
-                    // tambahan: simpan CSV, PDF, dan Excel ke reliable share root
-                    $shareRoot = $this->getReliableShareRoot();
-                    $shareMonthDir = $shareRoot . DIRECTORY_SEPARATOR . $monthName;
-                    try { if (! is_dir($shareMonthDir)) { mkdir($shareMonthDir, 0777, true); } } catch (\Throwable $_) {}
-                    $csvDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'csv';
-                    $excelDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'excel';
-                    $pdfDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'pdf';
-                    try { foreach ([$csvDir, $excelDir, $pdfDir] as $d) { if (! is_dir($d)) { mkdir($d, 0777, true); } } } catch (\Throwable $_) {}
+                    // Get customer name for PDF organization
+                    $customerName = $production_control->customer ?? $production_control->customer_name ?? 'unknown_customer';
+                    $safeCustomer = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $customerName);
+                    $safeCustomer = trim($safeCustomer, '-');
+                    
+                    // CSV: shareRoot/csv/ (tanpa bulan)
+                    $csvDir = $shareRoot . DIRECTORY_SEPARATOR . 'csv';
+                    try { if (! is_dir($csvDir)) { mkdir($csvDir, 0777, true); } } catch (\Throwable $_) {}
+                    
+                    // Excel: shareRoot/excel/ (tanpa bulan)
+                    $excelDir = $shareRoot . DIRECTORY_SEPARATOR . 'excel';
+                    try { if (! is_dir($excelDir)) { mkdir($excelDir, 0777, true); } } catch (\Throwable $_) {}
+                    
+                    // PDF: shareRoot/pdf/month/customer/
+                    $pdfDir = $shareRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . ($safeCustomer ?: 'unknown');
+                    try { if (! is_dir($pdfDir)) { mkdir($pdfDir, 0777, true); } } catch (\Throwable $_) {}
 
                     $base = preg_replace('/\.pdf$/i','', $filename);
                     try { $this->saveRecordCsv($production_control, $csvDir . DIRECTORY_SEPARATOR . $base . '.csv'); } catch (\Throwable $e) { Log::warning('Failed to save CSV', ['path' => $csvDir . DIRECTORY_SEPARATOR . $base . '.csv', 'error' => $e->getMessage()]); }
                     try { $this->saveRecordExcel($production_control, $excelDir . DIRECTORY_SEPARATOR . $base . '.xlsx'); } catch (\Throwable $e) { Log::warning('Failed to save Excel', ['path' => $excelDir . DIRECTORY_SEPARATOR . $base . '.xlsx', 'error' => $e->getMessage()]); }
-                    try { file_put_contents($pdfDir . DIRECTORY_SEPARATOR . $filename, $content); $this->backupFile($pdfDir . DIRECTORY_SEPARATOR . $filename, 'pdf'); } catch (\Throwable $e) { Log::warning('Failed to save PDF to month/pdf folder', ['path' => $pdfDir . DIRECTORY_SEPARATOR . $filename, 'error' => $e->getMessage()]); }
-
-                    // tetap simpan juga PDF per-customer: berbanding dengan share root
-                    $customerName = $production_control->customer ?? $production_control->customer_name ?? 'unknown_customer';
-                    $safeCustomer = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $customerName);
-                    $safeCustomer = trim($safeCustomer, '-');
-                    $customerPdfDir = $shareRoot . DIRECTORY_SEPARATOR . ($safeCustomer ?: 'unknown') . DIRECTORY_SEPARATOR . $monthName;
-                    try { if (! is_dir($customerPdfDir)) { mkdir($customerPdfDir, 0777, true); } } catch (\Throwable $_) {}
-                    try { file_put_contents($customerPdfDir . DIRECTORY_SEPARATOR . $filename, $content); $this->backupFile($customerPdfDir . DIRECTORY_SEPARATOR . $filename, 'pdf'); } catch (\Throwable $e) { Log::warning('Failed to save PDF to customer folder', ['path' => $customerPdfDir . DIRECTORY_SEPARATOR . $filename, 'error' => $e->getMessage()]); }
+                    try { file_put_contents($pdfDir . DIRECTORY_SEPARATOR . $filename, $content); $this->backupFile($pdfDir . DIRECTORY_SEPARATOR . $filename, 'pdf'); } catch (\Throwable $e) { Log::warning('Failed to save PDF', ['path' => $pdfDir . DIRECTORY_SEPARATOR . $filename, 'error' => $e->getMessage()]); }
                     // tandai record sudah didownload
                     $production_control->downloaded_at = now();
                     $production_control->save();
-                    return response()->download($path, $filename);
+                    return response()->streamDownload(fn() => $content, $filename);
                 } catch (\Exception $e) {
                     // jika tidak bisa menyimpan ke disk, kembalikan file langsung dari memory
-                    Log::warning('Failed to save report to disk, returning direct PDF download', ['path' => $path ?? null, 'error' => $e->getMessage()]);
+                    Log::warning('Failed to save report to disk, returning direct PDF download', ['error' => $e->getMessage()]);
                     try { $production_control->downloaded_at = now(); $production_control->save(); } catch (\Exception $ee) {}
                     return response($content, 200, [
                         'Content-Type' => 'application/pdf',
@@ -199,24 +193,28 @@ class ProductionControlController extends Controller
                     $path = $monthDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf';
                     file_put_contents($path, $content);
                     $files[] = $path;
-                    // simpan CSV, PDF, & Excel ke reliable share root
+                    // Save CSV, PDF, Excel to reliable share root with correct structure
                     $shareRoot = $this->getReliableShareRoot();
-                    $shareMonthDir = $shareRoot . DIRECTORY_SEPARATOR . $monthNames[(int) $recordDate->format('n')];
-                    try { if (! is_dir($shareMonthDir)) { mkdir($shareMonthDir, 0777, true); } } catch (\Throwable $_) {}
-                    $csvDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'csv';
-                    $excelDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'excel';
-                    $pdfDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'pdf';
-                    try { foreach ([$csvDir, $excelDir, $pdfDir] as $d) { if (! is_dir($d)) { mkdir($d, 0777, true); } } } catch (\Throwable $_) {}
-                    try { $this->saveRecordCsv($rec, $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv'); } catch (\Throwable $e) { Log::warning('Failed to save CSV', ['path' => $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv', 'error' => $e->getMessage()]); }
-                    try { $this->saveRecordExcel($rec, $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx'); } catch (\Throwable $e) { Log::warning('Failed to save Excel', ['path' => $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx', 'error' => $e->getMessage()]); }
-                    try { file_put_contents($pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', $content); } catch (\Throwable $e) { Log::warning('Failed to save PDF to month/pdf folder', ['path' => $pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', 'error' => $e->getMessage()]); }
-                    // simpan PDF juga di struktur customer/bulan
+                    
+                    // CSV: shareRoot/csv/ (tanpa bulan)
+                    $csvDir = $shareRoot . DIRECTORY_SEPARATOR . 'csv';
+                    try { if (! is_dir($csvDir)) { mkdir($csvDir, 0777, true); } } catch (\Throwable $_) {}
+                    
+                    // Excel: shareRoot/excel/ (tanpa bulan)
+                    $excelDir = $shareRoot . DIRECTORY_SEPARATOR . 'excel';
+                    try { if (! is_dir($excelDir)) { mkdir($excelDir, 0777, true); } } catch (\Throwable $_) {}
+                    
+                    // PDF: shareRoot/pdf/month/customer/
                     $customerName = $rec->customer ?? $rec->customer_name ?? 'unknown_customer';
                     $safeCustomer = preg_replace('/[^A-Za-z0-9]+/', '-', (string) $customerName);
                     $safeCustomer = trim($safeCustomer, '-');
-                    $customerPdfDir = $shareRoot . DIRECTORY_SEPARATOR . ($safeCustomer ?: 'unknown') . DIRECTORY_SEPARATOR . $monthNames[(int) $recordDate->format('n')];
-                    try { if (! is_dir($customerPdfDir)) { mkdir($customerPdfDir, 0777, true); } } catch (\Throwable $_) {}
-                    try { file_put_contents($customerPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', $content); } catch (\Throwable $e) { Log::warning('Failed to save PDF to customer folder', ['path' => $customerPdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', 'error' => $e->getMessage()]); }
+                    $pdfDir = $shareRoot . DIRECTORY_SEPARATOR . 'pdf' . DIRECTORY_SEPARATOR . $monthNames[(int) $recordDate->format('n')] . DIRECTORY_SEPARATOR . ($safeCustomer ?: 'unknown');
+                    try { if (! is_dir($pdfDir)) { mkdir($pdfDir, 0777, true); } } catch (\Throwable $_) {}
+                    
+                    try { $this->saveRecordCsv($rec, $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv'); } catch (\Throwable $e) { Log::warning('Failed to save CSV', ['path' => $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv', 'error' => $e->getMessage()]); }
+                    try { $this->saveRecordExcel($rec, $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx'); } catch (\Throwable $e) { Log::warning('Failed to save Excel', ['path' => $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx', 'error' => $e->getMessage()]); }
+                    try { file_put_contents($pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', $content); } catch (\Throwable $e) { Log::warning('Failed to save PDF', ['path' => $pdfDir . DIRECTORY_SEPARATOR . $filenameBase . '.pdf', 'error' => $e->getMessage()]); }
+                    
                     // mark downloaded
                     $rec->downloaded_at = now();
                     $rec->save();
@@ -232,13 +230,17 @@ class ProductionControlController extends Controller
             file_put_contents($path, $html);
             $files[] = $path;
 
-            // simpan CSV & Excel untuk HTML fallback juga ke reliable share root
+            // Save CSV & Excel for HTML fallback to reliable share root with correct structure
             $shareRoot = $this->getReliableShareRoot();
-            $shareMonthDir = $shareRoot . DIRECTORY_SEPARATOR . $monthNames[(int) $recordDate->format('n')];
-            try { if (! is_dir($shareMonthDir)) { mkdir($shareMonthDir, 0777, true); } } catch (\Throwable $_) {}
-            $csvDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'csv';
-            $excelDir = $shareMonthDir . DIRECTORY_SEPARATOR . 'excel';
-            try { foreach ([$csvDir, $excelDir] as $d) { if (! is_dir($d)) { mkdir($d, 0777, true); } } } catch (\Throwable $_) {}
+            
+            // CSV: shareRoot/csv/ (tanpa bulan)
+            $csvDir = $shareRoot . DIRECTORY_SEPARATOR . 'csv';
+            try { if (! is_dir($csvDir)) { mkdir($csvDir, 0777, true); } } catch (\Throwable $_) {}
+            
+            // Excel: shareRoot/excel/ (tanpa bulan)
+            $excelDir = $shareRoot . DIRECTORY_SEPARATOR . 'excel';
+            try { if (! is_dir($excelDir)) { mkdir($excelDir, 0777, true); } } catch (\Throwable $_) {}
+            
             try { $this->saveRecordCsv($rec, $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv'); } catch (\Throwable $e) { Log::warning('Failed to save CSV', ['path' => $csvDir . DIRECTORY_SEPARATOR . $filenameBase . '.csv', 'error' => $e->getMessage()]); }
             try { $this->saveRecordExcel($rec, $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx'); } catch (\Throwable $e) { Log::warning('Failed to save Excel', ['path' => $excelDir . DIRECTORY_SEPARATOR . $filenameBase . '.xlsx', 'error' => $e->getMessage()]); }
 

@@ -231,9 +231,13 @@ class GenerateProductionReports implements ShouldQueue
             $monthName = $monthNames[(int) $recordDate->format('n')];
 
             // Build PDF directory with proper path handling for Windows UNC/mapped drives
-            // store PDFs under a top-level 'pdf' folder: preferred_root/pdf/<bulan>/<customer>/<tanggal>
+            // store PDFs under a top-level 'pdf' folder: shareRoot/pdf/<bulan>/<customer>
+            $customerName = $rec->customer_name ?? (isset($rec->customer) && isset($rec->customer->name) ? $rec->customer->name : 'unknown');
+            $safeCustomer = preg_replace('/[^A-Za-z0-9\-\._]+/', '-', $customerName);
+            $safeCustomer = trim($safeCustomer, '-._');
+
             $rootForPdf = (strtolower(basename($saveRoot)) === 'pdf') ? $saveRoot : $saveRoot . DIRECTORY_SEPARATOR . 'pdf';
-            $pdfDir = $rootForPdf . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . $safeCustomer . DIRECTORY_SEPARATOR . $dateStr;
+            $pdfDir = $rootForPdf . DIRECTORY_SEPARATOR . $monthName . DIRECTORY_SEPARATOR . ($safeCustomer ?: 'unknown');
             if (! is_dir($pdfDir)) {
                 $mkdirRes = $ensureDir($pdfDir);
                 if (! $mkdirRes) {
@@ -241,7 +245,7 @@ class GenerateProductionReports implements ShouldQueue
                 }
             }
 
-            // Only write PDF files into the date folder (no HTML fallback saved there)
+            // Only write PDF files into the month/customer folder (no HTML fallback saved there)
             if (app()->bound('dompdf.wrapper')) {
                 try {
                     $pdf = app('dompdf.wrapper')->loadView('pdf.production_control', $data);
@@ -603,16 +607,16 @@ class GenerateProductionReports implements ShouldQueue
                 $year = $group['year'];
                 $monthName = $group['month'];
 
-                // create month dir under csv subfolder of chosen csvRoot: <csvRoot>\csv\<month>
-                $monthDir = $csvRoot . DIRECTORY_SEPARATOR . 'csv' . DIRECTORY_SEPARATOR . $monthName;
-                if (! is_dir($monthDir)) {
-                    $mkRes = $ensureDir($monthDir);
+                // CSV path: directly in csvRoot without month subfolder
+                // csvRoot is already storage/app/reports/csv
+                if (! is_dir($csvRoot)) {
+                    $mkRes = $ensureDir($csvRoot);
                     if (! $mkRes) {
-                        \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create month directory untuk CSV', ['dir' => $monthDir]);
+                        \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create csv root directory', ['dir' => $csvRoot]);
                     }
                 }
 
-                $csvPath = $monthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
+                $csvPath = $csvRoot . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
 
                 // build two-row header: primary header (group titles) and sub-header (field titles)
                 $primaryHeader = [];
@@ -820,9 +824,7 @@ class GenerateProductionReports implements ShouldQueue
                     $fallbackCsvRoot = storage_path('app' . DIRECTORY_SEPARATOR . config('report.fallback_subdir', 'reports') . DIRECTORY_SEPARATOR . 'csv');
                     if ($csvRoot !== $fallbackCsvRoot) {
                         if (! is_dir($fallbackCsvRoot)) { @mkdir($fallbackCsvRoot, 0777, true); }
-                        $fallbackMonthDir = $fallbackCsvRoot . DIRECTORY_SEPARATOR . $monthName;
-                        if (! is_dir($fallbackMonthDir)) { @mkdir($fallbackMonthDir, 0777, true); }
-                        $fallbackCsvPath = $fallbackMonthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
+                        $fallbackCsvPath = $fallbackCsvRoot . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.csv';
                         if (file_exists($csvPath)) { @copy($csvPath, $fallbackCsvPath); }
                         \Illuminate\Support\Facades\Log::info('GenerateProductionReports: csv also copied to local fallback', ['path' => $fallbackCsvPath, 'source' => $csvPath]);
 
@@ -844,18 +846,10 @@ class GenerateProductionReports implements ShouldQueue
                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to copy csv to local fallback', ['error' => $e->getMessage()]);
                 }
 
-                // Attempt to also copy CSV to preferred top-level REPORT PCS share under both csv\<month> and top-level csv\
+                // Attempt to also copy CSV to preferred top-level REPORT PCS share under csv\ folder
                 try {
                     $preferredTop = $preferredRoot; // config preferred root, or Z:\PROD\REPORT PCS
                     if (! empty($preferredTop) && file_exists($csvPath)) {
-                        // per-month location under preferred top: <preferredTop>\csv\<monthName>
-                        $targetCsvDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'csv' . DIRECTORY_SEPARATOR . $monthName;
-                        if (! is_dir($targetCsvDir)) { $ensureDir($targetCsvDir); }
-                        $targetCsvPath = $targetCsvDir . DIRECTORY_SEPARATOR . basename($csvPath);
-                        $copied = $verifyAndRetryCopy($csvPath, $targetCsvPath, 3, 500);
-                        if ($copied) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: csv copied to preferred csv\\month', ['target' => $targetCsvPath]); }
-                        else { \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to copy csv to preferred csv\\month', ['source' => $csvPath, 'target' => $targetCsvPath]); }
-
                         // top-level csv folder: <preferredTop>\csv\
                         $topCsvDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'csv';
                         if (! is_dir($topCsvDir)) { $ensureDir($topCsvDir); }
@@ -868,12 +862,18 @@ class GenerateProductionReports implements ShouldQueue
                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: exception copying csv to preferred top', ['error' => $e->getMessage()]);
                 }
 
-                // --- Excel export for the same month: write new rows into <root>\excel\<month>\year_month.xlsx ---
+                // --- Excel export for the same month: write new rows into storage/app/reports/excel/year_month.xlsx ---
                 try {
-                    // Excel path should be: <csvRoot>\excel\<monthName>\<year_monthName>.xlsx
-                    $excelMonthDir = $csvRoot . DIRECTORY_SEPARATOR . 'excel' . DIRECTORY_SEPARATOR . $monthName;
-                    if (! is_dir($excelMonthDir)) { $ensureDir($excelMonthDir); }
-                    $excelPath = $excelMonthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.xlsx';
+                    // Excel path: directly in excelRoot without month subfolder
+                    // excelRoot is storage/app/reports/excel
+                    $excelRoot = $fallbackRoot . DIRECTORY_SEPARATOR . 'excel';
+                    if (! is_dir($excelRoot)) {
+                        $mkRes = $ensureDir($excelRoot);
+                        if (! $mkRes) {
+                            \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to create excel root directory', ['dir' => $excelRoot]);
+                        }
+                    }
+                    $excelPath = $excelRoot . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.xlsx';
 
                     if (class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet')) {
                         if (file_exists($excelPath)) {
@@ -910,31 +910,23 @@ class GenerateProductionReports implements ShouldQueue
                         $writer->save($excelPath);
                     } else {
                         // fallback: copy csv to .xls inside excel folder (excel can open it)
-                        $fallbackExcelPath = $excelMonthDir . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.xls';
+                        $fallbackExcelPath = $excelRoot . DIRECTORY_SEPARATOR . $year . '_' . $monthName . '.xls';
                         if (file_exists($csvPath)) { @copy($csvPath, $fallbackExcelPath); }
                     }
                 } catch (\Throwable $e) {
                     \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: excel export failed', ['error' => $e->getMessage()]);
                 }
 
-                // Try copying excel file to preferred top-level REPORT PCS under both excel\<month> and top-level excel\
+                // Try copying excel file to preferred top-level REPORT PCS under excel\ folder
                 try {
                     $preferredTop = config('report.preferred_root', 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS');
                     if (! empty($preferredTop) && file_exists($excelPath)) {
-                        // per-month excel folder: <preferredTop>\excel\<monthName>
-                        $targetExcelDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'excel' . DIRECTORY_SEPARATOR . $monthName;
-                        if (! is_dir($targetExcelDir)) { $ensureDir($targetExcelDir); }
-                        $targetExcelPath = $targetExcelDir . DIRECTORY_SEPARATOR . basename($excelPath);
-                        $copied = $verifyAndRetryCopy($excelPath, $targetExcelPath, 3, 500);
-                        if ($copied) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: excel copied to preferred excel\\month', ['target' => $targetExcelPath]); }
-                        else { \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to copy excel to preferred excel\\month', ['source' => $excelPath, 'target' => $targetExcelPath]); }
-
                         // top-level excel folder: <preferredTop>\excel\
                         $topExcelDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'excel';
                         if (! is_dir($topExcelDir)) { $ensureDir($topExcelDir); }
                         $topExcelPath = $topExcelDir . DIRECTORY_SEPARATOR . basename($excelPath);
-                        $copiedTop2 = $verifyAndRetryCopy($excelPath, $topExcelPath, 3, 500);
-                        if ($copiedTop2) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: excel copied to preferred top-level excel', ['target' => $topExcelPath]); }
+                        $copiedTop = $verifyAndRetryCopy($excelPath, $topExcelPath, 3, 500);
+                        if ($copiedTop) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: excel copied to preferred top-level excel', ['target' => $topExcelPath]); }
                         else { \Illuminate\Support\Facades\Log::warning('GenerateProductionReports: failed to copy excel to preferred top-level excel', ['source' => $excelPath, 'target' => $topExcelPath]); }
                     }
                 } catch (\Throwable $e) {
@@ -950,56 +942,33 @@ class GenerateProductionReports implements ShouldQueue
         try {
             $preferredTop = config('report.preferred_root', 'Z:' . DIRECTORY_SEPARATOR . 'PROD' . DIRECTORY_SEPARATOR . 'REPORT PCS');
             if (! empty($preferredTop)) {
-                // CSV files
+                // CSV files: copy directly from fallback csv folder to preferred csv folder
                 $fallbackCsvBase = $fallbackRoot . DIRECTORY_SEPARATOR . 'csv';
                 if (is_dir($fallbackCsvBase)) {
-                    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($fallbackCsvBase, \FilesystemIterator::SKIP_DOTS));
+                    $it = new \DirectoryIterator($fallbackCsvBase);
                     foreach ($it as $f) {
                         if (! $f->isFile()) { continue; }
                         if (! preg_match('/\.csv$/i', $f->getFilename())) { continue; }
-                        // determine month folder relative to fallbackCsvBase
-                        $relPath = ltrim(str_replace($fallbackCsvBase, '', $f->getPath()), DIRECTORY_SEPARATOR);
-                        $parts = $relPath === '' ? [] : explode(DIRECTORY_SEPARATOR, $relPath);
-                        $monthName = $parts[0] ?? 'unknown';
-                        $targetDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'csv' . DIRECTORY_SEPARATOR . $monthName;
+                        $targetDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'csv';
                         if (! is_dir($targetDir)) { $ensureDir($targetDir); }
                         $targetPath = $targetDir . DIRECTORY_SEPARATOR . $f->getFilename();
                         $ok = $verifyAndRetryCopy($f->getPathname(), $targetPath, 3, 500);
                         if ($ok) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: copied csv fallback -> preferred', ['src' => $f->getPathname(), 'dest' => $targetPath]); }
-                        // Also copy to top-level csv folder as requested: Z:\PROD\REPORT PCS\csv\<filename>
-                        if (! empty($preferredTop)) {
-                            $topCsvDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'csv';
-                            if (! is_dir($topCsvDir)) { $ensureDir($topCsvDir); }
-                            $topTarget = $topCsvDir . DIRECTORY_SEPARATOR . $f->getFilename();
-                            $okTop = $verifyAndRetryCopy($f->getPathname(), $topTarget, 3, 500);
-                            if ($okTop) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: also copied csv to top-level csv folder', ['dest' => $topTarget]); }
-                        }
                     }
                 }
 
-                // Excel files
+                // Excel files: copy directly from fallback excel folder to preferred excel folder
                 $fallbackExcelBase = $fallbackRoot . DIRECTORY_SEPARATOR . 'excel';
                 if (is_dir($fallbackExcelBase)) {
-                    $it2 = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($fallbackExcelBase, \FilesystemIterator::SKIP_DOTS));
+                    $it2 = new \DirectoryIterator($fallbackExcelBase);
                     foreach ($it2 as $f2) {
                         if (! $f2->isFile()) { continue; }
                         if (! preg_match('/\.(xlsx|xls)$/i', $f2->getFilename())) { continue; }
-                        $relPath = ltrim(str_replace($fallbackExcelBase, '', $f2->getPath()), DIRECTORY_SEPARATOR);
-                        $parts = $relPath === '' ? [] : explode(DIRECTORY_SEPARATOR, $relPath);
-                        $monthName = $parts[0] ?? 'unknown';
-                        $targetDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'excel' . DIRECTORY_SEPARATOR . $monthName;
+                        $targetDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'excel';
                         if (! is_dir($targetDir)) { $ensureDir($targetDir); }
                         $targetPath = $targetDir . DIRECTORY_SEPARATOR . $f2->getFilename();
                         $ok2 = $verifyAndRetryCopy($f2->getPathname(), $targetPath, 3, 500);
                         if ($ok2) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: copied excel fallback -> preferred', ['src' => $f2->getPathname(), 'dest' => $targetPath]); }
-                        // Also copy to top-level excel folder: Z:\PROD\REPORT PCS\excel\<filename>
-                        if (! empty($preferredTop)) {
-                            $topExcelDir = rtrim($preferredTop, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'excel';
-                            if (! is_dir($topExcelDir)) { $ensureDir($topExcelDir); }
-                            $topTarget2 = $topExcelDir . DIRECTORY_SEPARATOR . $f2->getFilename();
-                            $okTop2 = $verifyAndRetryCopy($f2->getPathname(), $topTarget2, 3, 500);
-                            if ($okTop2) { \Illuminate\Support\Facades\Log::info('GenerateProductionReports: also copied excel to top-level excel folder', ['dest' => $topTarget2]); }
-                        }
                     }
                 }
             }
