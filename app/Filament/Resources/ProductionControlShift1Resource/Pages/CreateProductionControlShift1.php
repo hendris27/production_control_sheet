@@ -5,11 +5,45 @@ namespace App\Filament\Resources\ProductionControlShift1Resource\Pages;
 use App\Filament\Resources\ProductionControlShift1Resource;
 use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Support\Facades\Auth;
 
 class CreateProductionControlShift1 extends CreateRecord
 {
     protected static string $resource = ProductionControlShift1Resource::class;
     protected static ?string $title = 'Form Production Control Sheet';
+
+    // Enable Livewire polling events to call autosave from frontend when configured
+    protected $listeners = [
+        'autosaveDraft' => 'autosaveDraft',
+        'keepAlive' => 'keepAlive',
+    ];
+
+    /**
+     * Load draft for the authenticated user (if any) and fill the form.
+     */
+    public function mount(): void
+    {
+        // call parent mount if available to preserve Filament lifecycle
+        if (method_exists(get_parent_class($this), 'mount')) {
+            parent::mount();
+        }
+
+        try {
+            if (! Auth::check()) {
+                return;
+            }
+
+            $draft = \App\Models\ProductionControlDraft::where('user_id', Auth::id())
+                ->where('resource', static::class)
+                ->first();
+
+            if ($draft && is_array($draft->data)) {
+                $this->form->fill($draft->data);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('mount: failed to load draft: ' . $e->getMessage());
+        }
+    }
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
@@ -135,6 +169,58 @@ class CreateProductionControlShift1 extends CreateRecord
         return $this->getResource()::getUrl('index');
     }
 
+    /**
+     * Keep session alive by touching it. Can be called periodically via wire:poll.
+     */
+    public function keepAlive(): void
+    {
+        try {
+            session()->put('last_activity_at', now()->toDateTimeString());
+        } catch (\Throwable $e) {
+            // swallow - keepAlive must not break UI
+            \Illuminate\Support\Facades\Log::warning('keepAlive failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Autosave current form state as a draft to DB for the authenticated user.
+     * Called from wire:poll on the form/section or invoked manually.
+     */
+    public function autosaveDraft(): void
+    {
+        try {
+            if (! Auth::check()) {
+                return; // require user
+            }
+
+            // Get state from Filament form component
+            $state = [];
+            try {
+                $state = $this->form->getState();
+            } catch (\Throwable $e) {
+                // fallback: try request payload
+                $state = request()->all();
+            }
+
+            // reduce payload size: remove heavy or unnecessary items if needed
+            // Save or update draft
+            // Do not include nullable record_id in the search criteria — use user+resource.
+            $search = [
+                'user_id' => Auth::id(),
+                'resource' => static::class,
+            ];
+
+            \App\Models\ProductionControlDraft::updateOrCreate(
+                $search,
+                [
+                    'data' => $state,
+                ]
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('autosaveDraft failed: ' . $e->getMessage());
+        }
+    }
+
     protected function afterCreate(): void
     {
         try {
@@ -154,6 +240,16 @@ class CreateProductionControlShift1 extends CreateRecord
                         \Illuminate\Support\Facades\Log::error('CreateProductionControlShift1: fallback direct handle failed', ['id' => $id, 'error' => $e2->getMessage()]);
                     }
                 }
+            }
+            // Hapus draft yang tersimpan untuk user/resource ini setelah berhasil create
+            try {
+                if (Auth::check()) {
+                    \App\Models\ProductionControlDraft::where('user_id', Auth::id())
+                        ->where('resource', static::class)
+                        ->delete();
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('afterCreate: failed to delete draft: ' . $e->getMessage());
             }
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('CreateProductionControlShift1: failed during afterCreate flow: ' . $e->getMessage());

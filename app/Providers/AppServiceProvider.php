@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use App\Models\ProductionControlShift1;
 use App\Observers\ProductionControlShift1Observer;
 use Illuminate\Support\Facades\Gate;
+use Filament\Forms\Components\Field;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -23,6 +24,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Provide a no-op `persist()` macro for Filament form fields.
+        // This prevents errors when templates call ->persist() but the method
+        // is not available in the installed Filament version.
+        try {
+            if (method_exists(Field::class, 'macro')) {
+                Field::macro('persist', function () {
+                    return $this;
+                });
+            }
+        } catch (\Throwable $e) {
+            // ignore - macro registration is best-effort
+        }
+
                      // register model observer to append CSV on save
                      ProductionControlShift1::observe(ProductionControlShift1Observer::class);
                      // untuk scroll halaman view data storing FCT

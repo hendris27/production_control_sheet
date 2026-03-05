@@ -184,6 +184,7 @@ class ProductionControlShift1Resource extends Resource
                         ->label('')
                         ->numeric()
                         ->reactive()
+                        ->persist()
                         ->dehydrated(true)
                         // allow manual edit even when value was auto-filled from `model`
                         ->readonly(false)
@@ -217,7 +218,9 @@ class ProductionControlShift1Resource extends Resource
                                 $minutes = $ts2->minutes ?? $ts2->duration ?? 60;
                                 if ($computed_uph > 0 && $act > 0) {
                                     $uph_slot = max(1, (int) round(($computed_uph / 60) * $minutes));
-                                    $computedLoss = (int) round((1 - ($act / max(1, $uph_slot))) * $minutes);
+                                    //  Jika target manual diisi, gunakan itu sebagai basis perhitungan loss; jika tidak, gunakan target yang dihitung dari UPH
+                                    $slotBase = (isset($t) && $t > 0) ? $t : ((isset($target) && $target > 0) ? $target : $uph_slot);
+                                    $computedLoss = (int) round((1 - ($act / max(1, $slotBase))) * $minutes);
                                     $computedLoss = max(0, $computedLoss);
                                 } else {
                                     $computedLoss = 0;
@@ -267,6 +270,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('loss_total', $accLoss);
                             $set('balance_total', ($accActual - $accTarget));
                             $set('output', $accActual);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                         })
                         ->afterStateUpdated(function ($state, callable $set, callable $get) use ($timeSlots) {
                             $accTarget = $accActual = $accNg = $accLoss = 0;
@@ -284,7 +288,8 @@ class ProductionControlShift1Resource extends Resource
                                 $minutes = $ts->minutes ?? $ts->duration ?? 60;
                                 if ($computed_uph > 0 && $act > 0) {
                                     $uph_slot = max(1, (int) round(($computed_uph / 60) * $minutes));
-                                    $computedLoss = (int) round((1 - ($act / max(1, $uph_slot))) * $minutes);
+                                    $slotBase = ($target > 0) ? $target : $uph_slot;
+                                    $computedLoss = (int) round((1 - ($act / max(1, $slotBase))) * $minutes);
                                     $computedLoss = max(0, $computedLoss);
                                 } else {
                                     $computedLoss = 0;
@@ -334,6 +339,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('loss_total', $accLoss);
                             $set('balance_total', ($accActual - $accTarget));
                             $set('output', $accActual);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
 
                             // If ng_total changed, keep total_qty in sync but DO NOT auto-prefill items.
                             $val = (int) $accNg;
@@ -343,7 +349,7 @@ class ProductionControlShift1Resource extends Resource
                                 $set('quality_information', []);
                                 $set('qty_ng', 0);
                                 $set('qty_ok', 0);
-                                $set('output_total_ok', (int) ($get('output') ?? 0) + 0 + (int) ($get('output_add') ?? 0));
+                                $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                             } else {
                                 // Recompute derived sums from existing items only
                                 $ok = 0;
@@ -361,7 +367,7 @@ class ProductionControlShift1Resource extends Resource
                                 // update total output whenever qty_ok changes programmatically
                                 $output = (int) ($get('output') ?? 0);
                                 $add = (int) ($get('output_add') ?? 0);
-                                $set('output_total_ok', $output + $ok + $add);
+                                $set('output_total_ok', $output + $ok);
                                 $set('qty_ng', $ng);
                             }
                         })
@@ -372,6 +378,7 @@ class ProductionControlShift1Resource extends Resource
                         ->label('')
                         ->numeric()
                         ->reactive()
+                        ->persist()
                         ->minValue(0)
                         ->live(onBlur: true)
                         ->afterStateUpdated(function ($state, callable $set, callable $get) use ($timeSlots, $slug) {
@@ -434,7 +441,8 @@ class ProductionControlShift1Resource extends Resource
                                 $minutes = $ts->minutes ?? $ts->duration ?? 60;
                                 if ($computed_uph > 0 && $act > 0) {
                                     $uph_slot = max(1, (int) round(($computed_uph / 60) * $minutes));
-                                    $computedLoss = (int) round((1 - ($act / max(1, $uph_slot))) * $minutes);
+                                    $slotBase = ($target > 0) ? $target : $uph_slot;
+                                    $computedLoss = (int) round((1 - ($act / max(1, $slotBase))) * $minutes);
                                     $computedLoss = max(0, $computedLoss);
                                 } else {
                                     $computedLoss = 0;
@@ -486,6 +494,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('loss_total', $accLoss);
                             $set('balance_total', ($accActual - $accTarget));
                             $set('output', $accActual);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                         })
                         ->extraAttributes(array_merge($small, [
                             'onkeydown' => "if(event.key==='Enter'){this.blur();}",
@@ -497,6 +506,7 @@ class ProductionControlShift1Resource extends Resource
                         ->label('')
                         ->numeric()
                         ->reactive()
+                        ->persist()
                         ->live(onBlur: true)
                         ->afterStateUpdated(function ($state, callable $set, callable $get) use ($timeSlots) {
                             $accTarget = $accActual = $accNg = $accLoss = 0;
@@ -514,7 +524,8 @@ class ProductionControlShift1Resource extends Resource
                                 $minutes = $ts->minutes ?? $ts->duration ?? 60;
                                 if ($computed_uph > 0 && $act > 0) {
                                     $uph_slot = max(1, (int) round(($computed_uph / 60) * $minutes));
-                                    $computedLoss = (int) round((1 - ($act / max(1, $uph_slot))) * $minutes);
+                                    $slotBase = ($target > 0) ? $target : $uph_slot;
+                                    $computedLoss = (int) round((1 - ($act / max(1, $slotBase))) * $minutes);
                                     $computedLoss = max(0, $computedLoss);
                                 } else {
                                     $computedLoss = 0;
@@ -565,6 +576,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('loss_total', $accLoss);
                             $set('balance_total', ($accActual - $accTarget));
                             $set('output', $accActual);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
 
                             // Do not auto-prefill repeater here. Keep existing repeater items.
                             // If accNg is zero, clear repeater and reset sums; otherwise just recompute sums.
@@ -574,7 +586,7 @@ class ProductionControlShift1Resource extends Resource
                                 $set('quality_information', []);
                                 $set('qty_ng', 0);
                                 $set('qty_ok', 0);
-                                $set('output_total_ok', (int) ($get('output') ?? 0) + 0 + (int) ($get('output_add') ?? 0));
+                                $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                                 return;
                             }
 
@@ -592,7 +604,7 @@ class ProductionControlShift1Resource extends Resource
                                 $set('qty_ok', $ok);
                                 $output = (int) ($get('output') ?? 0);
                                 $add = (int) ($get('output_add') ?? 0);
-                                $set('output_total_ok', $output + $ok + $add);
+                                $set('output_total_ok', $output + $ok);
                                 $set('qty_ng', $ng);
                         })
                         ->extraAttributes(array_merge($small, [
@@ -613,6 +625,7 @@ class ProductionControlShift1Resource extends Resource
                         ->numeric()
                         ->default(0)
                         ->reactive()
+                        ->persist()
                         ->live(onBlur: true)
                         ->afterStateUpdated(function ($state, callable $set, callable $get) use ($timeSlots) {
                             $accTarget = $accActual = $accNg = $accLoss = 0;
@@ -667,6 +680,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('loss_total', $accLoss);
                             $set('balance_total', ($accActual - $accTarget));
                             $set('output', $accActual);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                         })
                         ->extraAttributes(array_merge($small, [
                             'onkeydown' => "if(event.key==='Enter'){this.blur();}",
@@ -680,6 +694,7 @@ class ProductionControlShift1Resource extends Resource
                             'Other' => 'Other',
                         ], \Illuminate\Support\Facades\DB::table('list_ngs')->pluck('ng_name', 'ng_name')->toArray()))
                         ->reactive()
+                        ->persist()
                         ->extraAttributes(array_merge($small, [
                             'style' => 'width:100%; max-width:220px; font-size:12px; padding:1px 2px; box-sizing:border-box;',
                             'onkeydown' => 'event.stopPropagation();', // agar enter tidak pindah ke baris lain
@@ -702,6 +717,7 @@ class ProductionControlShift1Resource extends Resource
                     Forms\Components\TextInput::make('remarks_other_' . $slug)
                         ->label('')
                         ->reactive()
+                        ->persist()
                         ->placeholder('Other...')
                         ->columnSpan(3)
                         ->extraAttributes(array_merge($small, [
@@ -718,6 +734,7 @@ class ProductionControlShift1Resource extends Resource
                         Forms\Components\TextInput::make('name_techinician' . $slug)
                         ->label('')
                         ->reactive()
+                        ->persist()
                         //->required()
                         ->placeholder('name_techinician')
 
@@ -828,6 +845,7 @@ class ProductionControlShift1Resource extends Resource
                     ->extraAttributes(['style' => 'font-weight:bold;text-align:right;']),
 
                 TextInput::make('target_total')
+                    ->persist()
                     ->label('')
                     ->disabled()
                     ->dehydrated(true)
@@ -835,14 +853,39 @@ class ProductionControlShift1Resource extends Resource
                     ->placeholder('0'),
 
                 TextInput::make('actual_total')
+                    ->persist()
                     ->label('')
                     ->readOnly()
                     ->reactive()
                     ->dehydrated(true)
                     ->extraAttributes($small)
-                    ->placeholder('0'),
+                    ->placeholder('0')
+                    ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                        $actual = (int) ($state ?? 0);
+                        $qtyOk = (int) ($get('qty_ok') ?? 0);
+
+                        // Jika actual dihapus/0, reset output dan total output OK ke 0
+                        if ($actual <= 0) {
+                            $set('output', 0);
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
+                            $set('qty_ok', 0);
+                            $set('output_total_ok', 0);
+                            $set('output_add', 0);
+                            // kosongkan repeater agar qty_ok tidak terisi kembali
+                            $set('quality_information', []);
+                            return;
+                        }
+
+                        $add = (int) ($get('output_add') ?? 0);
+                        $outputVal = $actual - $add;
+                        $set('output', $outputVal);
+                        $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
+                        // output_total_ok = output + qty_ok
+                        $set('output_total_ok', $outputVal + $qtyOk);
+                    }),
 
                 TextInput::make('ng_total')
+                    ->persist()
                     ->label('')
                     ->readOnly()
                     ->reactive()
@@ -877,7 +920,7 @@ class ProductionControlShift1Resource extends Resource
                             $set('quality_information', []);
                             $set('qty_ng', 0);
                             $set('qty_ok', 0);
-                            $set('output_total_ok', (int) ($get('output') ?? 0) + 0 + (int) ($get('output_add') ?? 0));
+                            $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                             return;
                         }
 
@@ -911,12 +954,13 @@ class ProductionControlShift1Resource extends Resource
                         $set('qty_ok', $ok);
                         $output = (int) ($get('output') ?? 0);
                         $add = (int) ($get('output_add') ?? 0);
-                        $set('output_total_ok', $output + $ok + $add);
+                        $set('output_total_ok', $output + $ok);
                         $set('qty_ng', $ng);
                     })
                     ->placeholder('0'),
 
                 TextInput::make('balance_total')
+                    ->persist()
                     ->label('')
                     ->disabled()
                     ->dehydrated(true)
@@ -924,6 +968,7 @@ class ProductionControlShift1Resource extends Resource
                     ->placeholder('0'),
 
                 TextInput::make('loss_total')
+                    ->persist()
                     ->label('')
                     ->disabled()
                     ->dehydrated(true)
@@ -975,12 +1020,14 @@ class ProductionControlShift1Resource extends Resource
                             ->default(now())
                             ->displayFormat('d/m/y')  // tampilan: 02/01/25
                             ->disabled()
-                            ->dehydrated(true),
+                            ->dehydrated(true)
+                            ->persist(),
 
                             Forms\Components\Select::make('select_shift')
                                 ->label('Shift')
                                 ->options(['1' => '1', '2' => '2', '3' => '3'])
                                 ->required()
+                                ->persist()
                                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
                                     // simpan nilai select_shift dan field shift
                                     $set('select_shift', $state);
@@ -1074,12 +1121,14 @@ class ProductionControlShift1Resource extends Resource
                                     $set('loss_total', $accLoss);
                                     $set('balance_total', ($accActual - $accTarget));
                                     $set('output', $accActual);
+                                    $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                                 }),
 
                             Forms\Components\Select::make('select_group')
                                 ->label('Group')
                                 ->options(['A' => 'A', 'B' => 'B', 'C' => 'C'])
                                 ->required()
+                                ->persist()
                                 ->afterStateUpdated(function ($state, callable $set) {
                                     $set('group', $state);
                                 }),
@@ -1088,6 +1137,7 @@ class ProductionControlShift1Resource extends Resource
                                 ->label('Work Hours')
                                 ->required()
                                 ->reactive()
+                                ->persist()
                                 ->placeholder('Select an option')
                                 ->options(['7 Hours' => '7 Hours', '5 Hours' => '5 Hours'])
                                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
@@ -1189,6 +1239,7 @@ class ProductionControlShift1Resource extends Resource
                                 ->required()
                                 ->label('Model')
                                 ->reactive()
+                                ->persist()
                                 ->columnSpan(3)
                                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
                                     // Auto-fill model_output dengan nilai dari model
@@ -1270,6 +1321,7 @@ class ProductionControlShift1Resource extends Resource
                                 ->required()
                                 ->label('DJ Number')
                                 ->live(onBlur: true)
+                                ->persist()
                                 ->afterStateUpdated(function ($state, callable $set) {
                                     // jika kosong, reset related fields
                                     if (empty($state)) {
@@ -1305,9 +1357,10 @@ class ProductionControlShift1Resource extends Resource
                             Forms\Components\TextInput::make('customer_name')
                                 ->required()
                                 ->label('Customer')
-                                ->columnSpan(2),
+                                ->columnSpan(2)
+                                ->persist(),
 
-                            TextInput::make('line')->label('Line No')->required(),
+                            TextInput::make('line')->label('Line No')->required()->persist(),
                             Placeholder::make('Select Form')
                                          ->label('Form *')
                                          ->hidden()
@@ -1359,22 +1412,26 @@ HTML
 
                             // Hidden field to mark confirmation from popup
                             TextInput::make('confirmed_selection')
+                                ->persist()
                                 ->hidden(),
 
                             // Hidden flag: indicates form fields were loaded from DB slots
                             TextInput::make('slots_loaded_from_db')
+                                ->persist()
                                 ->hidden(),
 
                             // Hidden field untuk shift_group (disimpan dari select_shiftgroup)
-                            TextInput::make('shift_group')->hidden(),
+                            TextInput::make('shift_group')->persist()->hidden(),
                             // Cache UPH per model agar tidak query DB berulang-ulang saat user mengetik actual/ng
                             TextInput::make('computed_uph')
+                                ->persist()
                                 ->hidden()
                                 ->reactive()
                                 ->dehydrated(false)
                                 ->default(0),
                             // Ensure repeater is initialized on form load when ng_total >= 1
                             TextInput::make('ensure_quality_init')
+                                ->persist()
                                 ->hidden()
                                 ->afterStateHydrated(function ($set, $get) {
                                     $ngTotal = (int) ($get('ng_total') ?? 0);
@@ -1432,14 +1489,16 @@ HTML
                             ->required()
                             ->options(fn () => ProductionControlShift1::processList())
                             ->searchable()
-                            ->columnSpan(2),
+                            ->columnSpan(2)
+                            ->persist(),
 
                             TextInput::make('ng_item')
                                 ->label('NG Item')
                                  ->required()
-                                ->columnSpan(1),
+                                ->columnSpan(1)
+                                ->persist(),
 
-                            TextInput::make('loc')->label('Location')->columnSpan(1)->required(),
+                            TextInput::make('loc')->label('Location')->columnSpan(1)->required()->persist(),
 
 
 
@@ -1449,6 +1508,7 @@ HTML
                                 ->label('QTY')
                                 ->numeric()
                                 ->minValue(0)
+                                ->persist()
                                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
                                     $total = (int) ($get('total_qty') ?? 0);
                                     $items = $get('quality_information') ?? [];
@@ -1482,7 +1542,7 @@ HTML
                                     $set('qty_ok', $ok);
                                     $output = (int) ($get('output') ?? 0);
                                     $add = (int) ($get('output_add') ?? 0);
-                                    $set('output_total_ok', $output + $ok + $add);
+                                    $set('output_total_ok', $output + $ok);
                                     $set('qty_ng', $ng);
                                 })
                                 ->columnSpan(1),
@@ -1516,7 +1576,7 @@ HTML
                                     $set('qty_ok', $ok);
                                     $output = (int) ($get('output') ?? 0);
                                     $add = (int) ($get('output_add') ?? 0);
-                                    $set('output_total_ok', $output + $ok + $add);
+                                    $set('output_total_ok', $output + $ok);
                                     $set('qty_ng', $ng);
                                 })
                                 ->columnSpan(1),
@@ -1595,7 +1655,7 @@ HTML
                             $set('qty_ok', $ok);
                             $output = (int) ($get('output') ?? 0);
                             $add = (int) ($get('output_add') ?? 0);
-                            $set('output_total_ok', $output + $ok + $add);
+                            $set('output_total_ok', $output + $ok);
                             $set('qty_ng', $ng);
                         })
                         ->afterStateUpdated(function ($state, callable $set, callable $get) {
@@ -1619,8 +1679,7 @@ HTML
                             }
                             $set('qty_ok', $ok);
                             $output = (int) ($get('output') ?? 0);
-                            $add = (int) ($get('output_add') ?? 0);
-                            $set('output_total_ok', $output + $ok + $add);
+                            $set('output_total_ok', $output + $ok );
                             $set('qty_ng', $ng);
                         })
                         ->minItems(function (callable $get) {
@@ -1668,14 +1727,13 @@ HTML
                                             $val = (int) ($get('qty_ok') ?? 0);
                                             $output = (int) ($get('output') ?? 0);
                                             $add = (int) ($get('output_add') ?? 0);
-                                            $set('output_total_ok', $output + $val + $add);
+                                            $set('output_total_ok', $output + $val);
                                         })
 
                                         ->afterStateUpdated(function ($state, callable $set, callable $get) {
                                             $val = (int) ($state ?? 0);
                                             $output = (int) ($get('output') ?? 0);
-                                            $add = (int) ($get('output_add') ?? 0);
-                                            $set('output_total_ok', $output + $val + $add);
+                                            $set('output_total_ok', $output + $val);
                                         })
 
                                         ->columnSpan(1),
@@ -1708,7 +1766,7 @@ HTML
                                             if ($ngTotal === 0) {
                                                 $set('quality_information', []);
                                                 $set('qty_ok', 0);
-                                                $set('output_total_ok', (int) ($get('output') ?? 0) + 0 + (int) ($get('output_add') ?? 0));
+                                                $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                                                 $set('qty_ng', 0);
                                             }
                                         })
@@ -1722,7 +1780,7 @@ HTML
                                             if ($ngTotal === 0) {
                                                 $set('quality_information', []);
                                                 $set('qty_ok', 0);
-                                                $set('output_total_ok', (int) ($get('output') ?? 0) + 0 + (int) ($get('output_add') ?? 0));
+                                                $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
                                                 $set('qty_ng', 0);
                                                 return;
                                             }
@@ -1742,8 +1800,7 @@ HTML
                                             }
                                             $set('qty_ok', $ok);
                                             $output = (int) ($get('output') ?? 0);
-                                            $add = (int) ($get('output_add') ?? 0);
-                                            $set('output_total_ok', $output + $ok + $add);
+                                            $set('output_total_ok', $output + $ok );
                                             $set('qty_ng', $ng);
                                         })
                                         ->columnSpan(1),
@@ -1830,35 +1887,21 @@ HTML
                                     // Auto-fill output = actual_total - output_add saat load
                                     $actualTotal = (int) ($get('actual_total') ?? 0);
                                     $add = (int) ($get('output_add') ?? 0);
-                                    $set('output', $actualTotal - $add);
-                                    // output_total_ok = output + qty_ok + output_add
-                                    $output = (int) ($get('output') ?? ($actualTotal - $add));
+                                    $outputVal = $actualTotal - $add;
+                                    $set('output', $outputVal);
+                                    $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
+                                    // output_total_ok = output + qty_ok
                                     $qtyOk = (int) ($get('qty_ok') ?? 0);
-                                    $add2 = (int) ($get('output_add') ?? 0);
-                                    $set('output_total_ok', $output + $qtyOk + $add2);
+                                    $set('output_total_ok', $outputVal + $qtyOk);
                                 })
                                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
                                     $o = (int) ($state ?? 0);
                                     $qtyOk = (int) ($get('qty_ok') ?? 0);
-                                    $add = (int) ($get('output_add') ?? 0);
-                                    $set('output_total_ok', $o + $qtyOk + $add);
+                                    // output_total_ok = output + qty_ok
+                                    $set('output_total_ok', $o + $qtyOk);
                                 }),
-                            // TextInput::make('start_time_add')->label('Start')->type('time'),
-                            // TextInput::make('end_time_add')->label('End')->type('time'),
-                              TextInput::make('output_add')
-                               ->label('Output')
-                               ->numeric()
-                                ->reactive()
-                                ->hidden()
-                                ->afterStateUpdated(function ($state, callable $set, callable $get) {
-                                    $add = (int) ($state ?? 0);
-                                    $actual = (int) ($get('actual_total') ?? 0);
-                                    $newOutput = $actual - $add;
-                                    $set('output', $newOutput);
-                                    $qtyOk = (int) ($get('qty_ok') ?? 0);
-                                    $set('output_total_ok', $newOutput + $qtyOk + $add);
-                                }),
-                            TextInput::make('remark_output')->label('Remark')->columnSpan(2)->hidden(),
+
+                            //TextInput::make('remark_output')->label('Remark')->columnSpan(2)->hidden(),
 
                             TextInput::make('output_total_ok')
                                 ->label('Total Output OK')
@@ -1866,10 +1909,23 @@ HTML
                                 ->reactive()
                                 ->readOnly()
                                 ->afterStateHydrated(function ($set, $get) {
-                                    $output = (int) ($get('output') ?? 0);
+                                    $actualTotal = (int) ($get('actual_total') ?? 0);
+                                    $outputVal = $actualTotal;
+                                    $set('output', $outputVal);
+                                    $set('output_total_ok', (int) ($get('output') ?? 0) + (int) ($get('qty_ok') ?? 0));
+                                    // output_total_ok = output + qty_ok
                                     $qtyOk = (int) ($get('qty_ok') ?? 0);
-                                    $add = (int) ($get('output_add') ?? 0);
-                                    $set('output_total_ok', $output + $qtyOk + $add);
+                                    $set('output_total_ok', $outputVal + $qtyOk);
+
+                                    //
+
+
+                                })
+                                  ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                                    $o = (int) ($state ?? 0);
+                                    $qtyOk = (int) ($get('qty_ok') ?? 0);
+                                    // output_total_ok = output + qty_ok
+                                    $set('output_total_ok', $o + $qtyOk);
                                 }),
 
                         ])
